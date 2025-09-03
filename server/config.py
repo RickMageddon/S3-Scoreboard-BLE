@@ -21,3 +21,11 @@ MAX_DEVICES = 54
 # Web server host / port
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
+
+# Optioneel: automatisch een browser (kiosk) openen op de Pi wanneer de server start
+# Zet LAUNCH_BROWSER=1 om dit te activeren. BROWSER_CMD kan aangepast worden (chromium-browser, chromium, firefox, etc.)
+LAUNCH_BROWSER = os.getenv("LAUNCH_BROWSER", "0") in ("1", "true", "True")
+BROWSER_CMD = os.getenv("BROWSER_CMD", "chromium-browser")
+
+# Test endpoints (simulatie zonder echte BLE). Zet ENABLE_TEST_ENDPOINTS=1 om /api/test/* routes te activeren.
+ENABLE_TEST_ENDPOINTS = os.getenv("ENABLE_TEST_ENDPOINTS", "0") in ("1", "true", "True")

@@ -43,6 +43,24 @@ python -m server.main
 
 Server draait standaard op `http://0.0.0.0:8000` -> open in Chromium/Firefox op de Pi (`http://localhost:8000`).
 
+### Automatisch browser (kiosk) openen
+Zet in je `.env` (of export voor je start):
+
+```bash
+LAUNCH_BROWSER=1
+BROWSER_CMD=chromium-browser  # of firefox / chromium
+```
+
+Bij start opent dan automatisch een fullscreen/kiosk venster. Bij stoppen (Ctrl+C) sluit het venster.
+
+Tip: Voeg een systemd service toe voor autostart bij boot (optioneel).
+
+### Verbinden met mobiel
+1. Zorg dat je telefoon op hetzelfde Wi-Fi netwerk zit als de Pi.
+2. Noteer het LAN IP van de Pi: `hostname -I` (bijv. `192.168.1.42`).
+3. Open op je mobiel `http://192.168.1.42:8000`.
+4. Zodra BLE devices verbinden verschijnen de tegels live.
+
 ## WebSocket Events
 
 Voorbeeld bericht (JSON):
