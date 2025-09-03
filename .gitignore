@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+build/
+dist/
+*.log
+
+# Virtual env
+.venv/
+venv/
+
+# Env vars / secrets
+.env
+.env.*
+
+# IDE
+.vscode/
+*.code-workspace
+
+# Node (voor toekomst / frontend tooling)
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# OS
+Thumbs.db
+.DS_Store

@@ -1,0 +1,95 @@
+:root {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --panel: #1b1f27;
+  --text: #f5f7fa;
+  --accent: #4ecdc4;
+  --danger: #ff6b6b;
+  font-family: system-ui, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+header, footer {
+  padding: 0.75rem 1rem;
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+header h1 {
+  font-size: 1.25rem;
+  margin: 0;
+  letter-spacing: 0.5px;
+}
+
+.status.error { color: var(--danger); }
+.status { font-size: 0.9rem; opacity: 0.85; }
+
+main { flex: 1; display: flex; }
+
+.grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  grid-template-rows: repeat(6, 1fr);
+  gap: 8px;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.tile {
+  position: relative;
+  background: linear-gradient(135deg, var(--tile-color, #333) 0%, #111 100%);
+  border-radius: 12px;
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 4px 12px -4px rgba(0,0,0,0.6);
+  border: 1px solid rgba(255,255,255,0.06);
+  animation: fadeIn 0.35s ease;
+  backdrop-filter: blur(4px);
+}
+
+.tile.enter { animation: popIn 0.35s cubic-bezier(.34,1.56,.64,1); }
+.tile.exit { animation: fadeOut 0.28s forwards ease; }
+
+.tile .top { display:flex; flex-direction:column; gap:2px; }
+.tile .device { font-weight:600; font-size:0.8rem; opacity:0.95; }
+.tile .game { font-size:0.65rem; opacity:0.7; }
+.tile .score { margin-top:auto; font-size:2.1vw; font-weight:700; text-align:right; line-height:1; }
+
+@media (max-width: 1400px) {
+  .tile .score { font-size:2.4vw; }
+}
+@media (max-width: 1000px) {
+  .tile .score { font-size:3vw; }
+}
+
+.tile .score.pulse { animation: pulse 0.6s ease; }
+
+@keyframes pulse {
+  0% { transform: scale(1); filter: brightness(1); }
+  40% { transform: scale(1.12); filter: brightness(1.35); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+
+@keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+@keyframes popIn { 0% { opacity:0; transform:scale(.6); } 70% { opacity:1; transform:scale(1.05); } 100% { transform:scale(1); } }
+@keyframes fadeOut { to { opacity:0; transform: scale(.85); } }
+
+footer { font-size: 0.7rem; opacity: 0.55; justify-content: center; }
