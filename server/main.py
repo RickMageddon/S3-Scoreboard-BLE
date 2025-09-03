@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from .config import HOST, PORT, LAUNCH_BROWSER, BROWSER_CMD, ENABLE_TEST_ENDPOINTS
+from .config import HOST, PORT, LAUNCH_BROWSER, BROWSER_CMD, ENABLE_TEST_ENDPOINTS, ENABLE_ADVERTISING
 from .ble_manager import ble_manager
 from .events import event_bus
 
@@ -28,6 +28,12 @@ browser_process: Optional[subprocess.Popen] = None
 async def startup():
     global browser_process
     await ble_manager.start()
+    if ENABLE_ADVERTISING:
+        try:
+            from .advertiser import ble_advertiser
+            await ble_advertiser.start()
+        except Exception as e:
+            logging.warning("Kon BLE advertiser niet starten: %s", e)
     if LAUNCH_BROWSER and browser_process is None:
         # Wacht heel even tot uvicorn luistert
         async def _delayed_launch():
@@ -65,6 +71,12 @@ async def startup():
 async def shutdown():
     global browser_process
     await ble_manager.stop()
+    if ENABLE_ADVERTISING:
+        try:
+            from .advertiser import ble_advertiser
+            await ble_advertiser.stop()
+        except Exception:
+            pass
     if browser_process and browser_process.poll() is None:
         try:
             logging.info("Terminating browser (pid=%s)", browser_process.pid)

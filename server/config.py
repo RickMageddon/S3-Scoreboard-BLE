@@ -29,3 +29,7 @@ BROWSER_CMD = os.getenv("BROWSER_CMD", "chromium-browser")
 
 # Test endpoints (simulatie zonder echte BLE). Zet ENABLE_TEST_ENDPOINTS=1 om /api/test/* routes te activeren.
 ENABLE_TEST_ENDPOINTS = os.getenv("ENABLE_TEST_ENDPOINTS", "0") in ("1", "true", "True")
+
+# BLE advertising (Pi als peripheral) – experimenteel: Linux + BlueZ vereist.
+ENABLE_ADVERTISING = os.getenv("ENABLE_ADVERTISING", "0") in ("1", "true", "True")
+ADVERTISING_NAME = os.getenv("ADVERTISING_NAME", "scoreboard-PI")
