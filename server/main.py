@@ -7,7 +7,7 @@ import signal
 import subprocess
 from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
@@ -18,7 +18,13 @@ from .events import event_bus
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(name)s: %(message)s")
 
 app = FastAPI(title="S3 Scoreboard BLE")
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+# Mount static assets op /static zodat WebSocket /ws niet door StaticFiles wordt gepakt
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/")
+async def root_index():
+    return FileResponse("static/index.html")
 
 
 browser_process: Optional[subprocess.Popen] = None

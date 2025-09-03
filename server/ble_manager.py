@@ -103,8 +103,9 @@ class BLEManager:
         client = BleakClient(d)
         try:
             await client.connect(timeout=10.0)
-            # Verify service
-            svcs = await client.get_services()
+            # Verify service (nieuwe manier: services property na fetch)
+            await client.get_services()
+            svcs = getattr(client, "services", [])
             if SERVICE_UUID.lower() not in [s.uuid.lower() for s in svcs]:
                 logger.info("Device %s missing service UUID; disconnecting", addr)
                 await client.disconnect()
