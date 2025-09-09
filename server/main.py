@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,18 +14,10 @@ from .events import event_bus
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(name)s: %(message)s")
 
-app = FastAPI(title="S3 Scoreboard BLE")
-# Mount static assets op /static zodat WebSocket /ws niet door StaticFiles wordt gepakt
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
-
-@app.get("/")
-async def root_index():
-    return FileResponse("static/index.html")
-
-
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
     await ble_manager.start()
     if ENABLE_ADVERTISING:
         try:
@@ -36,11 +29,8 @@ async def startup():
                 await gatt_server.start()
         except Exception as e:
             logging.warning("Kon BLE advertiser/GATT server niet starten: %s", e)
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    await ble_manager.stop()
+    yield
+    # Shutdown
     if ENABLE_ADVERTISING:
         try:
             from .advertiser import ble_advertiser
@@ -50,6 +40,17 @@ async def shutdown():
                 await gatt_server.stop()
         except Exception:
             pass
+    await ble_manager.stop()
+
+
+app = FastAPI(title="S3 Scoreboard BLE", lifespan=lifespan)
+# Mount static assets op /static zodat WebSocket /ws niet door StaticFiles wordt gepakt
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/")
+async def root_index():
+    return FileResponse("static/index.html")
 
 
 @app.get("/api/devices")
