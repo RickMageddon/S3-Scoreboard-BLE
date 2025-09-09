@@ -12,7 +12,7 @@ from .config import HOST, PORT, ENABLE_TEST_ENDPOINTS, ENABLE_ADVERTISING, ENABL
 from .ble_manager import ble_manager
 from .events import event_bus
 
-logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(name)s: %(message)s")
+logging.basicConfig(level=logging.WARNING, format="[%(asctime)s] %(levelname)s %(name)s: %(message)s")
 
 
 @asynccontextmanager
