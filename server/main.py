@@ -2,16 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import signal
-import subprocess
-from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from .config import HOST, PORT, LAUNCH_BROWSER, BROWSER_CMD, ENABLE_TEST_ENDPOINTS, ENABLE_ADVERTISING
+from .config import HOST, PORT, ENABLE_TEST_ENDPOINTS, ENABLE_ADVERTISING, ENABLE_GATT_SERVER
 from .ble_manager import ble_manager
 from .events import event_bus
 
@@ -27,81 +23,33 @@ async def root_index():
     return FileResponse("static/index.html")
 
 
-browser_process: Optional[subprocess.Popen] = None
-
-
 @app.on_event("startup")
 async def startup():
-    global browser_process
     await ble_manager.start()
     if ENABLE_ADVERTISING:
         try:
             from .advertiser import ble_advertiser
             await ble_advertiser.start()
+            if ENABLE_GATT_SERVER:
+                # Start GATT server voor peripheral mode
+                from .gatt_server import gatt_server
+                await gatt_server.start()
         except Exception as e:
-            logging.warning("Kon BLE advertiser niet starten: %s", e)
-    if LAUNCH_BROWSER and browser_process is None:
-        # Wacht heel even tot uvicorn luistert
-        async def _delayed_launch():
-            await asyncio.sleep(0.8)
-            url = f"http://localhost:{PORT}"
-            try:
-                # Gebruik kiosk/fullscreen flags indien chromium; anders gewoon openen
-                cmd = [BROWSER_CMD]
-                lower_cmd = BROWSER_CMD.lower()
-                if "chromium" in lower_cmd or "chrome" in lower_cmd:
-                    cmd += ["--noerrdialogs", "--disable-session-crashed-bubble", "--disable-infobars", "--kiosk", url]
-                elif "firefox" in lower_cmd:
-                    cmd += ["--kiosk", url]
-                else:
-                    cmd.append(url)
-                logging.info("Launching browser: %s", " ".join(cmd))
-                # Start in aparte process group zodat we hem later kunnen killen
-                browser_env = os.environ.copy()
-                browser_env.setdefault("DISPLAY", ":0")  # typical RPi
-                try:
-                    browser_proc = subprocess.Popen(cmd, env=browser_env, preexec_fn=os.setsid)  # type: ignore[arg-type]
-                except Exception:
-                    # Fallback zonder setsid (bv. op Windows ontwikkeling)
-                    browser_proc = subprocess.Popen(cmd, env=browser_env)
-                globals()["browser_process"] = browser_proc
-            except FileNotFoundError:
-                logging.warning("Browser command niet gevonden: %s", BROWSER_CMD)
-            except Exception as e:
-                logging.warning("Kon browser niet starten: %s", e)
-
-        asyncio.create_task(_delayed_launch())
+            logging.warning("Kon BLE advertiser/GATT server niet starten: %s", e)
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    global browser_process
     await ble_manager.stop()
     if ENABLE_ADVERTISING:
         try:
             from .advertiser import ble_advertiser
             await ble_advertiser.stop()
+            if ENABLE_GATT_SERVER:
+                from .gatt_server import gatt_server
+                await gatt_server.stop()
         except Exception:
             pass
-    if browser_process and browser_process.poll() is None:
-        try:
-            logging.info("Terminating browser (pid=%s)", browser_process.pid)
-            # Stuur SIGTERM naar process group indien mogelijk
-            try:
-                os.killpg(os.getpgid(browser_process.pid), signal.SIGTERM)  # type: ignore[arg-type]
-            except Exception:
-                browser_process.terminate()
-            try:
-                await asyncio.wait_for(asyncio.to_thread(browser_process.wait), timeout=3)
-            except asyncio.TimeoutError:
-                logging.info("Force killing browser")
-                try:
-                    os.killpg(os.getpgid(browser_process.pid), signal.SIGKILL)  # type: ignore[arg-type]
-                except Exception:
-                    browser_process.kill()
-        except Exception:
-            pass
-    browser_process = None
 
 
 @app.get("/api/devices")

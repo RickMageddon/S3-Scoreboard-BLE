@@ -41,25 +41,24 @@ pip install -r requirements.txt
 python -m server.main
 ```
 
-Server draait standaard op `http://0.0.0.0:8000` -> open in Chromium/Firefox op de Pi (`http://localhost:8000`).
+Server draait standaard op `http://0.0.0.0:8000` -> open in browser op de Pi (`http://localhost:8000`).
 
-### Automatisch browser (kiosk) openen
-Zet in je `.env` (of export voor je start):
+### Verbinden met mobiel (Pi als peripheral)
+De Pi kan ook als BLE peripheral adverteren, zodat je telefoon kan verbinden en scores sturen.
 
-```bash
-LAUNCH_BROWSER=1
-BROWSER_CMD=chromium-browser  # of firefox / chromium
-```
+1. Installeer pydbus: `pip install pydbus`
+2. Zet in `.env`:
+   ```bash
+   ENABLE_ADVERTISING=1
+   ENABLE_GATT_SERVER=1
+   ADVERTISING_NAME=scoreboard-PI
+   ```
+3. Start server: `python -m server.main`
+4. Op je telefoon: gebruik BLE app (nRF Connect, LightBlue) om te verbinden met "scoreboard-PI"
+5. Schrijf naar characteristic `29f80071-9a06-426b-8c26-02ae5df749a4` (score) met integer waarde (ASCII of 4-byte little-endian)
+6. Score verschijnt live op de website.
 
-Bij start opent dan automatisch een fullscreen/kiosk venster. Bij stoppen (Ctrl+C) sluit het venster.
-
-Tip: Voeg een systemd service toe voor autostart bij boot (optioneel).
-
-### Verbinden met mobiel
-1. Zorg dat je telefoon op hetzelfde Wi-Fi netwerk zit als de Pi.
-2. Noteer het LAN IP van de Pi: `hostname -I` (bijv. `192.168.1.42`).
-3. Open op je mobiel `http://192.168.1.42:8000`.
-4. Zodra BLE devices verbinden verschijnen de tegels live.
+De Pi toont zichzelf als device op de website; score updates van telefoon worden direct weergegeven.
 
 ## WebSocket Events
 
