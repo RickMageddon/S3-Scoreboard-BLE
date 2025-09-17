@@ -24,7 +24,7 @@ import shutil
 import subprocess
 from typing import Optional
 
-from .config import SERVICE_UUID, ADVERTISING_NAME
+from .config import SERVICE_UUID, ADVERTISING_NAME, DISABLE_AUTHENTICATION
 
 logger = logging.getLogger(__name__)
 
@@ -67,17 +67,29 @@ class BLEAdvertiser:
                 stderr=asyncio.subprocess.STDOUT,
             )
             await asyncio.sleep(0.2)
+            
+            # Configure for automatic connections without authentication
+            if DISABLE_AUTHENTICATION:
+                await self._send_cmd("pairable off")  # Disable pairing requirement
+                await self._send_cmd("agent NoInputNoOutput")  # Set no-input agent
+                await self._send_cmd("default-agent")
+                logger.info("Authentication disabled for automatic connections")
+            
             # Set alias (Device Name)
             await self._send_cmd(f"system-alias {ADVERTISING_NAME}")
-            # Maak (her) advertentie met service UUID
+            
+            # Create advertisement with service UUID
             await self._send_cmd("menu advertise")
             await self._send_cmd("clear")
             await self._send_cmd(f"uuid {SERVICE_UUID}")
+            await self._send_cmd("discoverable on")  # Ensure discoverable
             await self._send_cmd("back")
             await self._send_cmd("advertise on")
-            logger.info("Advertising gestart als '%s' met service %s", ADVERTISING_NAME, SERVICE_UUID)
+            
+            logger.info("Advertising gestart als '%s' met service %s%s", ADVERTISING_NAME, SERVICE_UUID, 
+                       " (no-auth mode)" if DISABLE_AUTHENTICATION else "")
 
-            # Houd proces in leven terwijl running
+            # Keep process alive while running
             while self._running and self._proc.returncode is None:
                 await asyncio.sleep(2)
         except Exception as e:

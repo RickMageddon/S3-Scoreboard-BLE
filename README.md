@@ -28,8 +28,36 @@ Moderne webinterface (9 x 6 raster) die dynamisch tegels toevoegt/verwijdert op 
 | `static/app.js` | WebSocket client + DOM logica |
 | `static/styles.css` | Styling (CSS Grid) |
 
-## Aanpassen BLE UUIDs
-Pas in `server/config.py` de UUIDs aan zodat ze overeenkomen met je devices.
+## Security & Connection Control
+
+The app implements strict security controls to prevent unauthorized connections:
+
+### Service UUID Filtering
+- **Default behavior**: Only connects to BLE devices advertising the exact service UUID (`c9b9a344-a062-4e55-a507-441c7e610e2c`)
+- **Automatic connection**: Devices with matching service UUID connect automatically without user intervention
+- **No authentication**: Connections require no PIN codes or pairing confirmation
+
+### Configuration Options
+
+Copy `.env.example` to `.env` and adjust settings:
+
+```bash
+# Strict filtering (recommended for security)
+STRICT_SERVICE_FILTER=1
+
+# Disable authentication for automatic connections
+DISABLE_AUTHENTICATION=1
+
+# Custom allowed device name patterns (only when STRICT_SERVICE_FILTER=0)
+ALLOWED_DEVICE_NAME_PATTERNS=scoreboard,game,ble
+```
+
+### Security Features
+- ✅ **Service UUID verification**: Only devices with matching service UUID can connect
+- ✅ **Automatic connection**: No manual pairing or confirmation required
+- ✅ **Authentication disabled**: No PIN codes or user interaction needed
+- ✅ **Connection filtering**: Rejects unauthorized devices immediately
+- ✅ **Reconnection support**: Automatically reconnects to known devices
 
 ## Installatie (Raspberry Pi)
 

@@ -14,6 +14,9 @@ from .config import (
     SCORE_CHAR_UUID,
     SCAN_INTERVAL,
     MAX_DEVICES,
+    STRICT_SERVICE_FILTER,
+    ALLOWED_DEVICE_NAME_PATTERNS,
+    DISABLE_AUTHENTICATION,
 )
 from .models import DeviceState
 from .events import event_bus
@@ -71,53 +74,108 @@ class BLEManager:
             self._clients.clear()
 
     async def _scan_loop(self):
-        logger.info("Starting BLE scan loop for service %s", SERVICE_UUID)
+        logger.info("Starting secure BLE scan loop for service %s", SERVICE_UUID)
+        consecutive_errors = 0
+        max_consecutive_errors = 5
+        
         while self._running:
             try:
-                found = await BleakScanner.discover()
+                # Use service UUID filter in scanner for more efficient discovery
+                found = await BleakScanner.discover(
+                    timeout=10.0,
+                    service_uuids=[SERVICE_UUID] if SERVICE_UUID else None
+                )
+                consecutive_errors = 0  # Reset error counter on successful scan
+                
                 tasks = []
                 for d in found:
                     if len(self.devices) >= MAX_DEVICES:
+                        logger.warning("Maximum device limit (%d) reached", MAX_DEVICES)
                         break
+                        
+                    # Only process devices that pass our security filter
                     if await self._device_matches(d):
                         addr = d.address
+                        # Auto-connect to new devices or reconnect to known devices
                         if addr not in self.devices and addr not in self._clients:
+                            logger.info("Auto-connecting to authorized device: %s (%s)", d.name or "Unknown", addr)
                             tasks.append(asyncio.create_task(self._connect_device(d)))
+                        elif addr in self.devices and addr not in self._clients:
+                            # Reconnect to previously known device
+                            logger.info("Auto-reconnecting to known device: %s (%s)", d.name or "Unknown", addr)
+                            tasks.append(asyncio.create_task(self._connect_device(d)))
+                
                 if tasks:
-                    await asyncio.gather(*tasks, return_exceptions=True)
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    # Log any connection failures
+                    for i, result in enumerate(results):
+                        if isinstance(result, Exception):
+                            logger.debug("Connection task failed: %s", result)
+                            
             except Exception as e:
-                logger.exception("Scan loop error: %s", e)
+                consecutive_errors += 1
+                logger.exception("Scan loop error (%d/%d): %s", consecutive_errors, max_consecutive_errors, e)
+                
+                # If too many consecutive errors, increase sleep time to avoid spam
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.warning("Too many scan errors, increasing scan interval temporarily")
+                    await asyncio.sleep(SCAN_INTERVAL * 3)
+                    consecutive_errors = 0
+                    continue
+                    
             await asyncio.sleep(SCAN_INTERVAL)
 
     async def _device_matches(self, d: BLEDevice) -> bool:
-        # Basic filter: service UUID in metadata if provided by scanner (platform dependent)
+        # Strict filter: only connect to devices that advertise our service UUID
         uuids = d.details.get("props", {}).get("UUIDs") if hasattr(d.details, "get") else None  # type: ignore
         if uuids and SERVICE_UUID.lower() in [u.lower() for u in uuids]:
             return True
-        # Fallback: optimistic attempt to connect and verify services later
-        return True
+        
+        # Check advertisement data for service UUID (more reliable on some platforms)
+        if hasattr(d, 'metadata') and d.metadata:
+            adv_data = d.metadata.get('manufacturer_data', {}) or d.metadata.get('service_data', {})
+            if any(SERVICE_UUID.lower() in str(v).lower() for v in adv_data.values()):
+                return True
+        
+        # If strict filtering is disabled, allow name-based matching for specific devices
+        if not STRICT_SERVICE_FILTER:
+            device_name = (d.name or "").lower()
+            if device_name and any(keyword.strip().lower() in device_name for keyword in ALLOWED_DEVICE_NAME_PATTERNS):
+                logger.info("Attempting connection to name-matched device: %s", d.name)
+                return True
+            
+        # SECURITY: No fallback - reject unknown devices
+        logger.debug("Rejecting device %s (%s) - no matching service UUID or name pattern", d.name or "Unknown", d.address)
+        return False
 
     async def _connect_device(self, d: BLEDevice):
         addr = d.address
-        logger.info("Connecting to %s (%s)", d.name, addr)
+        logger.info("Attempting secure connection to %s (%s)", d.name, addr)
         client = BleakClient(d)
         try:
-            await client.connect(timeout=10.0)
-            # Verify service (nieuwe manier: services property na fetch)
+            # Auto-connect without user intervention
+            await client.connect(timeout=15.0)
+            
+            # SECURITY: Verify service UUID before proceeding
             await client.get_services()
             svcs = getattr(client, "services", [])
-            if SERVICE_UUID.lower() not in [s.uuid.lower() for s in svcs]:
-                logger.info("Device %s missing service UUID; disconnecting", addr)
+            service_uuids = [s.uuid.lower() for s in svcs]
+            
+            if SERVICE_UUID.lower() not in service_uuids:
+                logger.warning("SECURITY: Device %s (%s) connected but missing required service UUID %s. Services found: %s", 
+                             d.name or "Unknown", addr, SERVICE_UUID, service_uuids)
                 await client.disconnect()
                 return
+
+            logger.info("SECURITY: Device %s verified with correct service UUID %s", addr, SERVICE_UUID)
 
             game_name = "Unknown Game"
             try:
                 if GAME_NAME_CHAR_UUID:
                     raw = await client.read_gatt_char(GAME_NAME_CHAR_UUID)
                     game_name = raw.decode(errors="ignore").strip() or game_name
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Could not read game name from %s: %s", addr, e)
 
             device_name = d.name or addr
             state = DeviceState(
@@ -132,6 +190,7 @@ class BLEManager:
                 self._clients[addr] = client
 
             await event_bus.publish({"type": "device_added", "device": state.to_dict()})
+            logger.info("Device %s (%s) successfully connected and added", device_name, addr)
 
             def handle_score(_, data: bytearray):  # notification callback
                 score = self._parse_score(data)
@@ -140,14 +199,15 @@ class BLEManager:
 
             try:
                 await client.start_notify(SCORE_CHAR_UUID, handle_score)
+                logger.debug("Score notifications enabled for %s", addr)
             except Exception as e:
                 logger.warning("Could not start score notifications for %s: %s", addr, e)
 
-            # Set disconnection callback
+            # Set disconnection callback for automatic cleanup
             client.set_disconnected_callback(lambda _: asyncio.create_task(self._handle_disconnect(addr)))
 
         except Exception as e:
-            logger.warning("Failed to connect %s: %s", addr, e)
+            logger.warning("Failed to connect to %s (%s): %s", d.name or "Unknown", addr, e)
             try:
                 await client.disconnect()
             except Exception:

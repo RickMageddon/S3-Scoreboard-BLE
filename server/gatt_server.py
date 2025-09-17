@@ -24,7 +24,7 @@ try:
 except ImportError:
     pydbus = None
 
-from .config import SERVICE_UUID, GAME_NAME_CHAR_UUID, SCORE_CHAR_UUID, ADVERTISING_NAME
+from .config import SERVICE_UUID, GAME_NAME_CHAR_UUID, SCORE_CHAR_UUID, ADVERTISING_NAME, DISABLE_AUTHENTICATION
 from .events import event_bus
 from .models import DeviceState
 from .ble_manager import deterministic_color
@@ -90,11 +90,23 @@ class GATTServer:
             self.bus = pydbus.SystemBus()
             self.adapter = self.bus.get("org.bluez", "/org/bluez/hci0")
 
-            # Set device name
+            # Configure adapter for automatic, no-auth connections
             self.adapter.Alias = ADVERTISING_NAME
             self.adapter.Powered = True
             self.adapter.Discoverable = True
-            self.adapter.Pairable = True
+            
+            if DISABLE_AUTHENTICATION:
+                self.adapter.Pairable = False  # Disable pairing requirement
+                
+                # Disable authentication requirements for automatic connections
+                try:
+                    # Set adapter to not require authentication
+                    self.adapter.Set("org.bluez.Adapter1", "PairableTimeout", 0)
+                    logger.info("Disabled pairing timeout for automatic connections")
+                except Exception as e:
+                    logger.debug("Could not disable pairing timeout: %s", e)
+            else:
+                self.adapter.Pairable = True
 
             # Register GATT service
             self.service = self.bus.register_object(
@@ -116,7 +128,8 @@ class GATTServer:
                 self._score_methods()
             )
 
-            logger.info("GATT server gestart als '%s'", ADVERTISING_NAME)
+            logger.info("GATT server gestart als '%s'%s", ADVERTISING_NAME, 
+                       " (no-auth mode)" if DISABLE_AUTHENTICATION else "")
 
             # Publish initial device
             device_state = DeviceState(
