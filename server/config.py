@@ -31,3 +31,9 @@ ADVERTISING_NAME = os.getenv("ADVERTISING_NAME", "scoreboard-PI")
 
 # GATT server voor peripheral mode (vereist ENABLE_ADVERTISING=1 en pydbus)
 ENABLE_GATT_SERVER = os.getenv("ENABLE_GATT_SERVER", "0") in ("1", "true", "True")
+
+# BLE connection restrictions - only connect to devices with matching service UUID
+STRICT_SERVICE_UUID_FILTERING = os.getenv("STRICT_SERVICE_UUID_FILTERING", "1") in ("1", "true", "True")
+
+# Logging level
+LOG_LEVEL = os.getenv("LOG_LEVEL", "WARNING").upper()

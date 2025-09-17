@@ -31,6 +31,14 @@ Moderne webinterface (9 x 6 raster) die dynamisch tegels toevoegt/verwijdert op 
 ## Aanpassen BLE UUIDs
 Pas in `server/config.py` de UUIDs aan zodat ze overeenkomen met je devices.
 
+## BLE Verbindingsbeperkingen
+Standaard verbindt de app alleen met BLE-apparaten die dezelfde Service UUID adverteren als geconfigureerd in `SCOREBOARD_SERVICE_UUID`. Dit zorgt voor:
+- **Beperkte connecties**: Alleen apparaten met de juiste Service UUID
+- **Automatische verbinding**: Geen gebruikersbevestiging vereist
+- **Geen pincode**: Volledig automatische verbinding
+
+Deze beperking kan worden uitgeschakeld door `STRICT_SERVICE_UUID_FILTERING=0` in het `.env` bestand te zetten.
+
 ## Installatie (Raspberry Pi)
 
 ```bash

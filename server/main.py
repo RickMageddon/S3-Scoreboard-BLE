@@ -8,11 +8,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from .config import HOST, PORT, ENABLE_TEST_ENDPOINTS, ENABLE_ADVERTISING, ENABLE_GATT_SERVER
+from .config import HOST, PORT, ENABLE_TEST_ENDPOINTS, ENABLE_ADVERTISING, ENABLE_GATT_SERVER, LOG_LEVEL
 from .ble_manager import ble_manager
 from .events import event_bus
 
-logging.basicConfig(level=logging.WARNING, format="[%(asctime)s] %(levelname)s %(name)s: %(message)s")
+logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.WARNING), format="[%(asctime)s] %(levelname)s %(name)s: %(message)s")
 
 
 @asynccontextmanager

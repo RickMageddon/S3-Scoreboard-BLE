@@ -14,6 +14,7 @@ from .config import (
     SCORE_CHAR_UUID,
     SCAN_INTERVAL,
     MAX_DEVICES,
+    STRICT_SERVICE_UUID_FILTERING,
 )
 from .models import DeviceState
 from .events import event_bus
@@ -71,18 +72,27 @@ class BLEManager:
             self._clients.clear()
 
     async def _scan_loop(self):
-        logger.info("Starting BLE scan loop for service %s", SERVICE_UUID)
+        logger.info("Starting BLE scan loop for service %s (strict filtering: %s)", SERVICE_UUID, STRICT_SERVICE_UUID_FILTERING)
         while self._running:
             try:
                 found = await BleakScanner.discover()
+                logger.debug("Found %d BLE devices during scan", len(found))
                 tasks = []
+                matched_devices = 0
                 for d in found:
                     if len(self.devices) >= MAX_DEVICES:
+                        logger.debug("Maximum device limit reached (%d)", MAX_DEVICES)
                         break
                     if await self._device_matches(d):
+                        matched_devices += 1
                         addr = d.address
                         if addr not in self.devices and addr not in self._clients:
+                            logger.info("Attempting to connect to matching device %s (%s)", d.name, addr)
                             tasks.append(asyncio.create_task(self._connect_device(d)))
+                        else:
+                            logger.debug("Device %s already known, skipping", addr)
+                
+                logger.debug("Matched %d devices, connecting to %d new devices", matched_devices, len(tasks))
                 if tasks:
                     await asyncio.gather(*tasks, return_exceptions=True)
             except Exception as e:
@@ -90,12 +100,35 @@ class BLEManager:
             await asyncio.sleep(SCAN_INTERVAL)
 
     async def _device_matches(self, d: BLEDevice) -> bool:
-        # Basic filter: service UUID in metadata if provided by scanner (platform dependent)
+        # Filter: only allow devices that advertise the required service UUID when strict filtering is enabled
+        # Check in advertisement data if available (platform dependent)
         uuids = d.details.get("props", {}).get("UUIDs") if hasattr(d.details, "get") else None  # type: ignore
         if uuids and SERVICE_UUID.lower() in [u.lower() for u in uuids]:
+            logger.debug("Device %s (%s) matches service UUID in advertisement", d.name, d.address)
             return True
-        # Fallback: optimistic attempt to connect and verify services later
-        return True
+        
+        # Check service data and manufacturer data for the service UUID
+        if hasattr(d, 'metadata') and d.metadata:
+            # Check service data
+            service_data = d.metadata.get('service_data', {})
+            if SERVICE_UUID.lower() in [uuid.lower() for uuid in service_data.keys()]:
+                logger.debug("Device %s (%s) matches service UUID in service data", d.name, d.address)
+                return True
+                
+            # Check service UUIDs list
+            service_uuids = d.metadata.get('service_uuids', [])
+            if SERVICE_UUID.lower() in [uuid.lower() for uuid in service_uuids]:
+                logger.debug("Device %s (%s) matches service UUID in metadata", d.name, d.address)
+                return True
+        
+        # If strict filtering is disabled, allow fallback to connecting and verifying later
+        if not STRICT_SERVICE_UUID_FILTERING:
+            logger.debug("Device %s (%s) allowed due to disabled strict filtering", d.name, d.address)
+            return True
+            
+        # No fallback when strict filtering is enabled - only connect to devices that explicitly advertise our service UUID
+        logger.debug("Device %s (%s) does not advertise required service UUID %s", d.name, d.address, SERVICE_UUID)
+        return False
 
     async def _connect_device(self, d: BLEDevice):
         addr = d.address
