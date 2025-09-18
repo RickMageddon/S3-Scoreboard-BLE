@@ -8,14 +8,17 @@ load_dotenv()
 # Service UUID waar de Pi naar zoekt om te beslissen of hij moet verbinden.
 SERVICE_UUID = os.getenv("SCOREBOARD_SERVICE_UUID", "c9b9a344-a062-4e55-a507-441c7e610e2c")
 
-# Vereenvoudigde characteristic UUID voor TX/RX communicatie
-# ESP32 schrijft data naar deze characteristic (TX van ESP32 naar Pi)
-# Pi kan ook data terugsturen via deze characteristic (RX van Pi naar ESP32)
-DATA_CHAR_UUID = os.getenv("DATA_CHAR_UUID", "29f80071-9a06-426b-8c26-02ae5df749a4")
+# TX/RX Characteristic UUIDs voor ESP32 <-> Pi communicatie
+# RX: Pi ontvangt data van ESP32 (game naam, scores, status)
+RX_CHAR_UUID = os.getenv("RX_CHAR_UUID", "29f80071-9a06-426b-8c26-02ae5df749a4")
 
-# Legacy UUIDs (deprecated - gebruik DATA_CHAR_UUID)
-GAME_NAME_CHAR_UUID = os.getenv("GAME_NAME_CHAR_UUID", DATA_CHAR_UUID)  # Fallback to DATA_CHAR_UUID
-SCORE_CHAR_UUID = os.getenv("SCORE_CHAR_UUID", DATA_CHAR_UUID)  # Fallback to DATA_CHAR_UUID
+# TX: Pi stuurt data naar ESP32 (commando's, configuratie)
+TX_CHAR_UUID = os.getenv("TX_CHAR_UUID", "a43359d2-e50e-43c9-ad86-b77ee5c6524e")
+
+# Legacy aliases (deprecated - gebruik RX_CHAR_UUID en TX_CHAR_UUID)
+DATA_CHAR_UUID = RX_CHAR_UUID  # Backward compatibility
+GAME_NAME_CHAR_UUID = TX_CHAR_UUID  # Legacy support
+SCORE_CHAR_UUID = RX_CHAR_UUID      # Legacy support
 
 # Security: Only connect to devices with matching service UUID
 STRICT_SERVICE_FILTER = os.getenv("STRICT_SERVICE_FILTER", "1") in ("1", "true", "True")

@@ -10,7 +10,9 @@ from bleak.backends.device import BLEDevice
 
 from .config import (
     SERVICE_UUID,
-    DATA_CHAR_UUID,
+    RX_CHAR_UUID,
+    TX_CHAR_UUID,
+    DATA_CHAR_UUID,     # Legacy support
     GAME_NAME_CHAR_UUID,  # Legacy support
     SCORE_CHAR_UUID,      # Legacy support
     SCAN_INTERVAL,
@@ -203,27 +205,27 @@ class BLEManager:
 
             logger.info("SECURITY: Device %s verified with correct service UUID %s", addr, SERVICE_UUID)
 
-            # TX/RX Setup: Read initial data from device
+            # RX Setup: Read initial data from ESP32
             game_name = "Unknown Game"
             initial_score = 0
             
             try:
-                # Try to read initial data from the unified DATA characteristic
-                raw_data = await client.read_gatt_char(DATA_CHAR_UUID)
-                parsed_data = self._parse_tx_data(raw_data)
+                # Read initial data from RX characteristic (ESP32 -> Pi)
+                raw_data = await client.read_gatt_char(RX_CHAR_UUID)
+                parsed_data = self._parse_rx_data(raw_data)
                 if parsed_data:
                     game_name = parsed_data.get("game_name", game_name)
                     initial_score = parsed_data.get("score", initial_score)
-                    logger.debug("RX from %s: game='%s', score=%d", addr, game_name, initial_score)
+                    logger.debug("Initial RX from %s: game='%s', score=%d", addr, game_name, initial_score)
             except Exception as e:
-                logger.debug("Could not read initial data from %s: %s", addr, e)
-                # Fallback to legacy characteristics if available
+                logger.debug("Could not read initial RX data from %s: %s", addr, e)
+                # Fallback: Try to read game name from TX characteristic (legacy)
                 try:
-                    if GAME_NAME_CHAR_UUID and GAME_NAME_CHAR_UUID != DATA_CHAR_UUID:
-                        raw = await client.read_gatt_char(GAME_NAME_CHAR_UUID)
-                        game_name = raw.decode(errors="ignore").strip() or game_name
+                    raw = await client.read_gatt_char(TX_CHAR_UUID)
+                    game_name = raw.decode(errors="ignore").strip() or game_name
+                    logger.debug("Read game name from TX char (legacy): %s", game_name)
                 except Exception as e2:
-                    logger.debug("Legacy game name read failed for %s: %s", addr, e2)
+                    logger.debug("Legacy TX read failed for %s: %s", addr, e2)
 
             device_name = d.name or addr
             state = DeviceState(
@@ -240,17 +242,17 @@ class BLEManager:
             await event_bus.publish({"type": "device_added", "device": state.to_dict()})
             logger.info("Device %s (%s) successfully connected and added", device_name, addr)
 
-            # TX/RX Setup: Enable notifications for real-time data updates
-            def handle_data_rx(_, data: bytearray):  # RX callback from ESP32
-                parsed_data = self._parse_tx_data(data)
+            # RX Setup: Enable notifications for real-time data from ESP32
+            def handle_rx_data(_, data: bytearray):  # RX callback from ESP32
+                parsed_data = self._parse_rx_data(data)
                 if parsed_data:
                     asyncio.create_task(self._handle_rx_data(addr, parsed_data))
 
             try:
-                await client.start_notify(DATA_CHAR_UUID, handle_data_rx)
-                logger.debug("TX/RX notifications enabled for %s on %s", addr, DATA_CHAR_UUID)
+                await client.start_notify(RX_CHAR_UUID, handle_rx_data)
+                logger.debug("RX notifications enabled for %s on %s", addr, RX_CHAR_UUID)
             except Exception as e:
-                logger.warning("Could not enable TX/RX notifications for %s: %s", addr, e)
+                logger.warning("Could not enable RX notifications for %s: %s", addr, e)
                 # Fallback to legacy score characteristic
                 try:
                     def handle_legacy_score(_, data: bytearray):
@@ -299,7 +301,7 @@ class BLEManager:
                 await event_bus.publish(payload)
 
     async def send_tx_data(self, addr: str, data: Dict[str, any]) -> bool:
-        """Send data to ESP32 (TX from Pi perspective)"""
+        """Send data to ESP32 via TX characteristic (Pi -> ESP32)"""
         async with self._lock:
             if addr not in self._clients:
                 logger.warning("Cannot TX to %s: device not connected", addr)
@@ -308,19 +310,19 @@ class BLEManager:
             client = self._clients[addr]
             
         try:
-            # Encode data as JSON for transmission
+            # Encode data as JSON for transmission to ESP32
             import json
             json_data = json.dumps(data)
-            await client.write_gatt_char(DATA_CHAR_UUID, json_data.encode())
-            logger.debug("TX to %s: %s", addr, json_data)
+            await client.write_gatt_char(TX_CHAR_UUID, json_data.encode())
+            logger.debug("TX to %s via %s: %s", addr, TX_CHAR_UUID, json_data)
             return True
         except Exception as e:
             logger.warning("Failed to TX data to %s: %s", addr, e)
             return False
 
     @staticmethod
-    def _parse_tx_data(data: bytearray) -> Optional[Dict[str, any]]:
-        """Parse incoming data from ESP32 (TX from ESP32, RX from Pi)"""
+    def _parse_rx_data(data: bytearray) -> Optional[Dict[str, any]]:
+        """Parse incoming data from ESP32 via RX characteristic (ESP32 -> Pi)"""
         if not data:
             return None
             
@@ -358,8 +360,13 @@ class BLEManager:
         except Exception:
             pass
             
-        logger.debug("Could not parse TX data: %s", data)
+        logger.debug("Could not parse RX data: %s", data)
         return None
+
+    @staticmethod 
+    def _parse_tx_data(data: bytearray) -> Optional[Dict[str, any]]:
+        """Legacy method - redirects to _parse_rx_data for backward compatibility"""
+        return BLEManager._parse_rx_data(data)
 
     async def _update_score(self, addr: str, score: int):
         """Legacy score update method"""

@@ -23,13 +23,14 @@ server/
 ├── main.py          # FastAPI server + WebSocket endpoints
 ├── ble_manager.py   # BLE scanning en verbindingsbeheer
 ├── config.py        # Configuratie instellingen
+├── gatt_server.py   # BLE peripheral mode (Pi als GATT server)
 ├── models.py        # Data models
 └── events.py        # Event system voor UI updates
 
 static/
 ├── index.html       # Webinterface
-├── app.js          # WebSocket client logica
-└── styles.css      # CSS Grid styling
+├── app.js           # WebSocket client logica
+└── styles.css       # CSS Grid styling
 
 examples/
 └── esp32_txrx_example.cpp  # ESP32 voorbeeld code
@@ -40,17 +41,18 @@ examples/
 ### Service en Characteristics
 ```
 Service UUID:     c9b9a344-a062-4e55-a507-441c7e610e2c
-Data Characteristic: 29f80071-9a06-426b-8c26-02ae5df749a4
+RX Characteristic: 29f80071-9a06-426b-8c26-02ae5df749a4  (ESP32 → Pi)
+TX Characteristic: a43359d2-e50e-43c9-ad86-b77ee5c6524e  (Pi → ESP32)
 ```
 
 ### Data formaten
-ESP32 naar Pi (JSON):
+ESP32 naar Pi (RX characteristic, JSON):
 ```json
 {"game_name": "MijnSpel", "score": 42}
 {"score": 50}
 ```
 
-Pi naar ESP32 (commando's):
+Pi naar ESP32 (TX characteristic, JSON commando's):
 ```json
 {"command": "reset"}
 {"command": "set_game", "game_name": "NieuwSpel"}
@@ -82,8 +84,9 @@ pip install -r requirements.txt
 Kopieer `.env.example` naar `.env` en pas aan indien nodig:
 ```bash
 SCOREBOARD_SERVICE_UUID=c9b9a344-a062-4e55-a507-441c7e610e2c
-DATA_CHAR_UUID=29f80071-9a06-426b-8c26-02ae5df749a4
-STRICT_SERVICE_UUID_FILTERING=1
+RX_CHAR_UUID=29f80071-9a06-426b-8c26-02ae5df749a4
+TX_CHAR_UUID=a43359d2-e50e-43c9-ad86-b77ee5c6524e
+STRICT_SERVICE_FILTER=1
 ```
 
 ### Server starten
@@ -98,7 +101,9 @@ De webinterface is bereikbaar op `http://localhost:8000`
 Gebruik de voorbeeldcode in `examples/esp32_txrx_example.cpp`. Belangrijke punten:
 
 1. Adverteer de juiste Service UUID
-2. Maak een characteristic met read/write/notify properties
+2. Maak twee characteristics aan:
+   - RX (Pi ontvangt): 29f80071-9a06-426b-8c26-02ae5df749a4
+   - TX (Pi stuurt):   a43359d2-e50e-43c9-ad86-b77ee5c6524e
 3. Stuur data in JSON formaat
 4. Device naam maakt niet uit voor beveiliging
 

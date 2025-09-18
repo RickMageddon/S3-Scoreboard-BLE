@@ -24,14 +24,14 @@ try:
 except ImportError:
     pydbus = None
 
-from .config import SERVICE_UUID, DATA_CHAR_UUID, GAME_NAME_CHAR_UUID, SCORE_CHAR_UUID, ADVERTISING_NAME, DISABLE_AUTHENTICATION
+from .config import SERVICE_UUID, RX_CHAR_UUID, TX_CHAR_UUID, DATA_CHAR_UUID, GAME_NAME_CHAR_UUID, SCORE_CHAR_UUID, ADVERTISING_NAME, DISABLE_AUTHENTICATION
 from .events import event_bus
 from .models import DeviceState
 from .ble_manager import deterministic_color
 
 logger = logging.getLogger(__name__)
 
-# GATT Service en TX/RX Characteristic definities
+# GATT Service en RX/TX Characteristic definities
 SCOREBOARD_SERVICE_XML = f"""
 <node>
   <interface name="org.bluez.GattService1">
@@ -41,11 +41,11 @@ SCOREBOARD_SERVICE_XML = f"""
 </node>
 """
 
-# Unified TX/RX Data Characteristic
-DATA_CHAR_XML = f"""
+# RX Characteristic: Pi ontvangt data van ESP32 (game naam, scores)
+RX_CHAR_XML = f"""
 <node>
   <interface name="org.bluez.GattCharacteristic1">
-    <property name="UUID" type="s" value="{DATA_CHAR_UUID}"/>
+    <property name="UUID" type="s" value="{RX_CHAR_UUID}"/>
     <property name="Service" type="o" value="/org/bluez/example/service0"/>
     <property name="Value" type="ay" value=""/>
     <property name="Flags" type="as">
@@ -57,20 +57,22 @@ DATA_CHAR_XML = f"""
 </node>
 """
 
-# Legacy characteristics (for backward compatibility)
-GAME_NAME_CHAR_XML = f"""
+# TX Characteristic: Pi stuurt data naar ESP32 (commando's)
+TX_CHAR_XML = f"""
 <node>
   <interface name="org.bluez.GattCharacteristic1">
-    <property name="UUID" type="s" value="{GAME_NAME_CHAR_UUID}"/>
+    <property name="UUID" type="s" value="{TX_CHAR_UUID}"/>
     <property name="Service" type="o" value="/org/bluez/example/service0"/>
     <property name="Value" type="ay" value=""/>
     <property name="Flags" type="as">
       <item>read</item>
+      <item>write</item>
     </property>
   </interface>
 </node>
 """
 
+# Legacy characteristics (for backward compatibility)
 SCORE_CHAR_XML = f"""
 <node>
   <interface name="org.bluez.GattCharacteristic1">
@@ -132,17 +134,18 @@ class GATTServer:
                 self._service_methods()
             )
 
-            # Register characteristics
-            self.game_name_char = self.bus.register_object(
+            # Register RX characteristic (ESP32 -> Pi)
+            self.rx_char = self.bus.register_object(
                 "/org/bluez/example/service0/char0",
-                GAME_NAME_CHAR_XML,
-                self._game_name_methods()
+                RX_CHAR_XML,
+                self._rx_methods()
             )
 
-            self.score_char = self.bus.register_object(
+            # Register TX characteristic (Pi -> ESP32)
+            self.tx_char = self.bus.register_object(
                 "/org/bluez/example/service0/char1",
-                SCORE_CHAR_XML,
-                self._score_methods()
+                TX_CHAR_XML,
+                self._tx_methods()
             )
 
             logger.info("GATT server gestart als '%s'%s", ADVERTISING_NAME, 
@@ -168,8 +171,8 @@ class GATTServer:
         if self.bus:
             try:
                 self.bus.unregister_object(self.service)
-                self.bus.unregister_object(self.game_name_char)
-                self.bus.unregister_object(self.score_char)
+                self.bus.unregister_object(self.rx_char)
+                self.bus.unregister_object(self.tx_char)
             except Exception:
                 pass
         self.bus = None
@@ -182,32 +185,48 @@ class GATTServer:
             "StopNotify": self._stop_notify,
         }
 
-    def _game_name_methods(self):
+    def _rx_methods(self):
+        """RX Characteristic: Pi ontvangt data van ESP32"""
         return {
-            "ReadValue": lambda: self.game_name.encode(),
-        }
-
-    def _score_methods(self):
-        return {
-            "ReadValue": lambda: str(self.score).encode(),
-            "WriteValue": self._write_score,
+            "ReadValue": lambda: self._get_current_state().encode(),
+            "WriteValue": self._handle_rx_write,
             "StartNotify": lambda: None,
             "StopNotify": lambda: None,
         }
 
-    def _read_value(self, options):
-        # Generic read
-        pass
+    def _tx_methods(self):
+        """TX Characteristic: Pi stuurt data naar ESP32"""
+        return {
+            "ReadValue": lambda: "".encode(),  # Empty for TX
+            "WriteValue": self._handle_tx_write,
+        }
 
-    def _write_value(self, value, options):
-        # Generic write
-        pass
+    def _get_current_state(self):
+        """Get current game state as JSON for RX reads"""
+        import json
+        return json.dumps({
+            "game_name": self.game_name,
+            "score": self.score,
+            "device": "PI-SELF"
+        })
 
-    def _write_score(self, value):
+    def _handle_rx_write(self, value):
+        """Handle data written to RX characteristic (from ESP32)"""
         try:
-            new_score = int(value.decode().strip())
-            if new_score != self.score:
-                self.score = new_score
+            import json
+            data_str = value.decode('utf-8').strip()
+            data = json.loads(data_str)
+            
+            updated = False
+            if "game_name" in data and data["game_name"] != self.game_name:
+                self.game_name = data["game_name"]
+                updated = True
+                
+            if "score" in data and data["score"] != self.score:
+                self.score = data["score"]
+                updated = True
+                
+            if updated:
                 # Publish update
                 device_state = DeviceState(
                     id="PI-SELF",
@@ -217,9 +236,27 @@ class GATTServer:
                     color=deterministic_color("PI-SELF")
                 )
                 asyncio.create_task(event_bus.publish({"type": "device_updated", "device": device_state.to_dict()}))
-                logger.info("Score updated to %d", new_score)
+                logger.info("RX update: game='%s', score=%d", self.game_name, self.score)
+                
         except Exception as e:
-            logger.warning("Invalid score write: %s", e)
+            logger.warning("Invalid RX data: %s", e)
+
+    def _handle_tx_write(self, value):
+        """Handle data written to TX characteristic (commands to ESP32)"""
+        try:
+            data_str = value.decode('utf-8').strip()
+            logger.info("TX command received: %s", data_str)
+            # Commands to ESP32 would be handled here
+        except Exception as e:
+            logger.warning("Invalid TX command: %s", e)
+
+    def _read_value(self, options):
+        # Generic read
+        pass
+
+    def _write_value(self, value, options):
+        # Generic write
+        pass
 
     def _start_notify(self):
         pass
