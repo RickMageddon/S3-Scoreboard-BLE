@@ -10,8 +10,9 @@ from bleak.backends.device import BLEDevice
 
 from .config import (
     SERVICE_UUID,
-    GAME_NAME_CHAR_UUID,
-    SCORE_CHAR_UUID,
+    DATA_CHAR_UUID,
+    GAME_NAME_CHAR_UUID,  # Legacy support
+    SCORE_CHAR_UUID,      # Legacy support
     SCAN_INTERVAL,
     MAX_DEVICES,
     STRICT_SERVICE_FILTER,
@@ -202,20 +203,34 @@ class BLEManager:
 
             logger.info("SECURITY: Device %s verified with correct service UUID %s", addr, SERVICE_UUID)
 
+            # TX/RX Setup: Read initial data from device
             game_name = "Unknown Game"
+            initial_score = 0
+            
             try:
-                if GAME_NAME_CHAR_UUID:
-                    raw = await client.read_gatt_char(GAME_NAME_CHAR_UUID)
-                    game_name = raw.decode(errors="ignore").strip() or game_name
+                # Try to read initial data from the unified DATA characteristic
+                raw_data = await client.read_gatt_char(DATA_CHAR_UUID)
+                parsed_data = self._parse_tx_data(raw_data)
+                if parsed_data:
+                    game_name = parsed_data.get("game_name", game_name)
+                    initial_score = parsed_data.get("score", initial_score)
+                    logger.debug("RX from %s: game='%s', score=%d", addr, game_name, initial_score)
             except Exception as e:
-                logger.debug("Could not read game name from %s: %s", addr, e)
+                logger.debug("Could not read initial data from %s: %s", addr, e)
+                # Fallback to legacy characteristics if available
+                try:
+                    if GAME_NAME_CHAR_UUID and GAME_NAME_CHAR_UUID != DATA_CHAR_UUID:
+                        raw = await client.read_gatt_char(GAME_NAME_CHAR_UUID)
+                        game_name = raw.decode(errors="ignore").strip() or game_name
+                except Exception as e2:
+                    logger.debug("Legacy game name read failed for %s: %s", addr, e2)
 
             device_name = d.name or addr
             state = DeviceState(
                 id=addr,
                 name=device_name,
                 game_name=game_name,
-                score=0,
+                score=initial_score,
                 color=deterministic_color(addr),
             )
             async with self._lock:
@@ -225,16 +240,28 @@ class BLEManager:
             await event_bus.publish({"type": "device_added", "device": state.to_dict()})
             logger.info("Device %s (%s) successfully connected and added", device_name, addr)
 
-            def handle_score(_, data: bytearray):  # notification callback
-                score = self._parse_score(data)
-                if score is not None:
-                    asyncio.create_task(self._update_score(addr, score))
+            # TX/RX Setup: Enable notifications for real-time data updates
+            def handle_data_rx(_, data: bytearray):  # RX callback from ESP32
+                parsed_data = self._parse_tx_data(data)
+                if parsed_data:
+                    asyncio.create_task(self._handle_rx_data(addr, parsed_data))
 
             try:
-                await client.start_notify(SCORE_CHAR_UUID, handle_score)
-                logger.debug("Score notifications enabled for %s", addr)
+                await client.start_notify(DATA_CHAR_UUID, handle_data_rx)
+                logger.debug("TX/RX notifications enabled for %s on %s", addr, DATA_CHAR_UUID)
             except Exception as e:
-                logger.warning("Could not start score notifications for %s: %s", addr, e)
+                logger.warning("Could not enable TX/RX notifications for %s: %s", addr, e)
+                # Fallback to legacy score characteristic
+                try:
+                    def handle_legacy_score(_, data: bytearray):
+                        score = self._parse_score(data)
+                        if score is not None:
+                            asyncio.create_task(self._update_score(addr, score))
+                    
+                    await client.start_notify(SCORE_CHAR_UUID, handle_legacy_score)
+                    logger.debug("Legacy score notifications enabled for %s", addr)
+                except Exception as e2:
+                    logger.warning("Could not enable legacy notifications for %s: %s", addr, e2)
 
             # Set disconnection callback for automatic cleanup
             client.set_disconnected_callback(lambda _: asyncio.create_task(self._handle_disconnect(addr)))
@@ -246,7 +273,96 @@ class BLEManager:
             except Exception:
                 pass
 
+    async def _handle_rx_data(self, addr: str, data: Dict[str, any]):
+        """Handle incoming data from ESP32 (RX from Pi perspective)"""
+        async with self._lock:
+            if addr not in self.devices:
+                return
+                
+            device = self.devices[addr]
+            updated = False
+            
+            # Update game name if provided
+            if "game_name" in data and data["game_name"] != device.game_name:
+                device.game_name = data["game_name"]
+                updated = True
+                logger.debug("RX game_name update from %s: %s", addr, data["game_name"])
+            
+            # Update score if provided
+            if "score" in data and data["score"] != device.score:
+                device.score = data["score"]
+                updated = True
+                logger.debug("RX score update from %s: %d", addr, data["score"])
+            
+            if updated:
+                payload = {"type": "device_updated", "device": device.to_dict()}
+                await event_bus.publish(payload)
+
+    async def send_tx_data(self, addr: str, data: Dict[str, any]) -> bool:
+        """Send data to ESP32 (TX from Pi perspective)"""
+        async with self._lock:
+            if addr not in self._clients:
+                logger.warning("Cannot TX to %s: device not connected", addr)
+                return False
+                
+            client = self._clients[addr]
+            
+        try:
+            # Encode data as JSON for transmission
+            import json
+            json_data = json.dumps(data)
+            await client.write_gatt_char(DATA_CHAR_UUID, json_data.encode())
+            logger.debug("TX to %s: %s", addr, json_data)
+            return True
+        except Exception as e:
+            logger.warning("Failed to TX data to %s: %s", addr, e)
+            return False
+
+    @staticmethod
+    def _parse_tx_data(data: bytearray) -> Optional[Dict[str, any]]:
+        """Parse incoming data from ESP32 (TX from ESP32, RX from Pi)"""
+        if not data:
+            return None
+            
+        try:
+            # Try JSON format first (recommended)
+            import json
+            json_str = data.decode('utf-8').strip()
+            parsed = json.loads(json_str)
+            logger.debug("Parsed JSON data: %s", parsed)
+            return parsed
+        except Exception:
+            pass
+            
+        try:
+            # Fallback: Try simple format "game_name:score" or just "score"
+            text = data.decode('utf-8').strip()
+            if ':' in text:
+                parts = text.split(':', 1)
+                return {
+                    "game_name": parts[0].strip(),
+                    "score": int(parts[1].strip())
+                }
+            else:
+                # Just a score number
+                return {"score": int(text)}
+        except Exception:
+            pass
+            
+        try:
+            # Fallback: Binary score (4-byte little endian)
+            if len(data) >= 4:
+                import struct
+                score = struct.unpack_from("<I", data, 0)[0]
+                return {"score": score}
+        except Exception:
+            pass
+            
+        logger.debug("Could not parse TX data: %s", data)
+        return None
+
     async def _update_score(self, addr: str, score: int):
+        """Legacy score update method"""
         async with self._lock:
             if addr in self.devices:
                 if self.devices[addr].score == score:

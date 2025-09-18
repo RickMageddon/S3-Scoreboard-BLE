@@ -24,14 +24,14 @@ try:
 except ImportError:
     pydbus = None
 
-from .config import SERVICE_UUID, GAME_NAME_CHAR_UUID, SCORE_CHAR_UUID, ADVERTISING_NAME, DISABLE_AUTHENTICATION
+from .config import SERVICE_UUID, DATA_CHAR_UUID, GAME_NAME_CHAR_UUID, SCORE_CHAR_UUID, ADVERTISING_NAME, DISABLE_AUTHENTICATION
 from .events import event_bus
 from .models import DeviceState
 from .ble_manager import deterministic_color
 
 logger = logging.getLogger(__name__)
 
-# GATT Service en Characteristics definities
+# GATT Service en TX/RX Characteristic definities
 SCOREBOARD_SERVICE_XML = f"""
 <node>
   <interface name="org.bluez.GattService1">
@@ -41,6 +41,23 @@ SCOREBOARD_SERVICE_XML = f"""
 </node>
 """
 
+# Unified TX/RX Data Characteristic
+DATA_CHAR_XML = f"""
+<node>
+  <interface name="org.bluez.GattCharacteristic1">
+    <property name="UUID" type="s" value="{DATA_CHAR_UUID}"/>
+    <property name="Service" type="o" value="/org/bluez/example/service0"/>
+    <property name="Value" type="ay" value=""/>
+    <property name="Flags" type="as">
+      <item>read</item>
+      <item>write</item>
+      <item>notify</item>
+    </property>
+  </interface>
+</node>
+"""
+
+# Legacy characteristics (for backward compatibility)
 GAME_NAME_CHAR_XML = f"""
 <node>
   <interface name="org.bluez.GattCharacteristic1">

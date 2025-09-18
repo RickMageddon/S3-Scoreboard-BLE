@@ -1,125 +1,144 @@
 # S3 Scoreboard BLE
 
-Moderne webinterface (9 x 6 raster) die dynamisch tegels toevoegt/verwijdert op basis van BLE verbindingen met de Raspberry Pi 4 (Raspberry Pi OS 64-bit).
+Een webinterface die in real-time scoreboards toont van BLE-apparaten die verbonden zijn met een Raspberry Pi 4. De interface toont maximaal 54 apparaten in een 9x6 grid layout.
 
-## Architectuur
+## Hoe het werkt
 
-- Raspberry Pi draait een Python backend (FastAPI) die:
-  - BLE scant naar apparaten die een specifieke Service UUID adverteren.
-  - Verbindt als central (client) met elk gevonden device.
-  - Leest kenmerken (naam van de game, score) en luistert naar score-updates via notificaties.
-  - Houdt real-time state bij en pusht wijzigingen via WebSockets naar de frontend.
-- Frontend (static web app) toont een 9 kolommen x 6 rijen grid (max 54 tegels) met:
-  - Apparaatnaam
-  - Gamenaam
-  - Score (live updates)
-  - Unieke kleur per apparaat (deterministisch gegenereerd)
+De Raspberry Pi draait een Python backend die:
+- Scant naar BLE-apparaten met een specifieke Service UUID
+- Automatisch verbindt met gevonden apparaten
+- Ontvangt game naam en score updates via BLE notificaties
+- Stuurt wijzigingen via WebSockets naar de webinterface
 
-## Bestanden
+De webinterface toont voor elk apparaat:
+- Device naam
+- Game naam
+- Live score updates
+- Unieke kleur (automatisch toegekend)
 
-| Pad | Omschrijving |
-|-----|--------------|
-| `server/main.py` | Start FastAPI + WebSocket endpoints |
-| `server/ble_manager.py` | BLE scanning & verbindingen beheren |
-| `server/models.py` | Dataclasses / pydantic modellen |
-| `server/events.py` | Eenvoudige async pub/sub voor UI updates |
-| `server/config.py` | Configuratie (service UUID, characteristics) |
-| `static/index.html` | Frontend HTML |
-| `static/app.js` | WebSocket client + DOM logica |
-| `static/styles.css` | Styling (CSS Grid) |
+## Project structuur
 
-## Security & Connection Control
+```
+server/
+├── main.py          # FastAPI server + WebSocket endpoints
+├── ble_manager.py   # BLE scanning en verbindingsbeheer
+├── config.py        # Configuratie instellingen
+├── models.py        # Data models
+└── events.py        # Event system voor UI updates
 
-The app implements strict security controls to prevent unauthorized connections:
+static/
+├── index.html       # Webinterface
+├── app.js          # WebSocket client logica
+└── styles.css      # CSS Grid styling
 
-### Service UUID Filtering
-- **Default behavior**: Only connects to BLE devices advertising the exact service UUID (`c9b9a344-a062-4e55-a507-441c7e610e2c`)
-- **Automatic connection**: Devices with matching service UUID connect automatically without user intervention
-- **No authentication**: Connections require no PIN codes or pairing confirmation
-
-### Configuration Options
-
-Copy `.env.example` to `.env` and adjust settings:
-
-```bash
-# Strict filtering (recommended for security)
-STRICT_SERVICE_FILTER=1
-
-# Disable authentication for automatic connections
-DISABLE_AUTHENTICATION=1
-
-# Custom allowed device name patterns (only when STRICT_SERVICE_FILTER=0)
-ALLOWED_DEVICE_NAME_PATTERNS=scoreboard,game,ble
+examples/
+└── esp32_txrx_example.cpp  # ESP32 voorbeeld code
 ```
 
-### Security Features
-- ✅ **Service UUID verification**: Only devices with matching service UUID can connect
-- ✅ **Automatic connection**: No manual pairing or confirmation required
-- ✅ **Authentication disabled**: No PIN codes or user interaction needed
-- ✅ **Connection filtering**: Rejects unauthorized devices immediately
-- ✅ **Reconnection support**: Automatically reconnects to known devices
+## BLE Communicatie
 
-## BLE Verbindingsbeperkingen
-Standaard verbindt de app alleen met BLE-apparaten die dezelfde Service UUID adverteren als geconfigureerd in `SCOREBOARD_SERVICE_UUID`. Dit zorgt voor:
-- **Beperkte connecties**: Alleen apparaten met de juiste Service UUID
-- **Automatische verbinding**: Geen gebruikersbevestiging vereist
-- **Geen pincode**: Volledig automatische verbinding
+### Service en Characteristics
+```
+Service UUID:     c9b9a344-a062-4e55-a507-441c7e610e2c
+Data Characteristic: 29f80071-9a06-426b-8c26-02ae5df749a4
+```
 
-Deze beperking kan worden uitgeschakeld door `STRICT_SERVICE_UUID_FILTERING=0` in het `.env` bestand te zetten.
+### Data formaten
+ESP32 naar Pi (JSON):
+```json
+{"game_name": "MijnSpel", "score": 42}
+{"score": 50}
+```
 
-## Installatie (Raspberry Pi)
+Pi naar ESP32 (commando's):
+```json
+{"command": "reset"}
+{"command": "set_game", "game_name": "NieuwSpel"}
+```
 
+Voor eenvoudige apparaten zijn ook tekst formaten ondersteund:
+- `"MijnSpel:42"` (game:score)
+- `"42"` (alleen score)
+
+## Beveiliging
+
+De Pi verbindt alleen met apparaten die de juiste Service UUID adverteren. Dit voorkomt verbindingen met willekeurige BLE-apparaten in de buurt.
+
+Standaard instellingen:
+- Strict filtering: aan
+- Automatische verbinding: aan
+- Geen pincode/pairing vereist
+
+## Installatie
+
+### Raspberry Pi setup
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade pip
 pip install -r requirements.txt
+```
+
+### Configuratie
+Kopieer `.env.example` naar `.env` en pas aan indien nodig:
+```bash
+SCOREBOARD_SERVICE_UUID=c9b9a344-a062-4e55-a507-441c7e610e2c
+DATA_CHAR_UUID=29f80071-9a06-426b-8c26-02ae5df749a4
+STRICT_SERVICE_UUID_FILTERING=1
+```
+
+### Server starten
+```bash
 python -m server.main
 ```
 
-Server draait standaard op `http://0.0.0.0:8000` -> open in browser op de Pi (`http://localhost:8000`).
+De webinterface is bereikbaar op `http://localhost:8000`
 
-### Verbinden met mobiel (Pi als peripheral)
-De Pi kan ook als BLE peripheral adverteren, zodat je telefoon kan verbinden en scores sturen.
+## ESP32 implementatie
 
-1. Installeer pydbus: `pip install pydbus`
-2. Zet in `.env`:
-   ```bash
-   ENABLE_ADVERTISING=1
-   ENABLE_GATT_SERVER=1
-   ADVERTISING_NAME=scoreboard-PI
-   ```
-3. Start server: `python -m server.main`
-4. Op je telefoon: gebruik BLE app (nRF Connect, LightBlue) om te verbinden met "scoreboard-PI"
-5. Schrijf naar characteristic `29f80071-9a06-426b-8c26-02ae5df749a4` (score) met integer waarde (ASCII of 4-byte little-endian)
-6. Score verschijnt live op de website.
+Gebruik de voorbeeldcode in `examples/esp32_txrx_example.cpp`. Belangrijke punten:
 
-De Pi toont zichzelf als device op de website; score updates van telefoon worden direct weergegeven.
+1. Adverteer de juiste Service UUID
+2. Maak een characteristic met read/write/notify properties
+3. Stuur data in JSON formaat
+4. Device naam maakt niet uit voor beveiliging
 
-## WebSocket Events
+### Vereiste libraries
+- ArduinoJson (via Library Manager)
+- ESP32 BLE Arduino (ingebouwd)
 
-Voorbeeld bericht (JSON):
+## API
 
-```json
-{
-  "type": "device_added",
-  "device": {"id": "AA:BB:CC:DD:EE:FF", "name": "MyDevice", "game_name": "Space Run", "score": 42, "color": "#FF6B6B"}
-}
+### REST endpoints
+```
+GET  /api/devices           # Lijst van verbonden apparaten
+POST /api/devices/{id}/send # Stuur commando naar apparaat
 ```
 
-## Kleurtoewijzing
-Deterministisch op basis van MAC adres hash, uit vaste palet. Consistent tijdens runtime.
+### WebSocket
+```
+ws://localhost:8000/ws      # Real-time updates
+```
 
-## Flutter (Optioneel)
-Wil je later Flutter Web gebruiken, dan kun je de WebSocket API (`/ws`) hergebruiken. De backend hoeft niet te veranderen.
+## Peripheral mode (experimenteel)
 
-## Beperkingen / TODO
-* Device discovery & connect retry strategie is basaal.
-* Geen authenticatie (niet nodig voor lokaal gebruik).
-* Score notificatie parser is simpel (verwacht integer ASCII of little-endian 4 byte int).
+De Pi kan ook als BLE peripheral fungeren voor verbindingen met telefoons:
 
-## Stoppen
-Ctrl+C in terminal.
+```bash
+# In .env:
+ENABLE_ADVERTISING=1
+ENABLE_GATT_SERVER=1
+
+# Vereist: sudo rechten en pydbus
+pip install pydbus
+```
+
+## Beperkingen
+
+- Maximaal 54 apparaten (grid grootte)
+- Eenvoudige retry logica voor verbindingen
+- Geen authenticatie (geschikt voor lokaal netwerk)
+- Linux/BlueZ vereist voor peripheral mode
 
 ## Licentie
-MIT (pas aan indien gewenst).
+
+MIT

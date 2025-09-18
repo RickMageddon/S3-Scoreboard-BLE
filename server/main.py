@@ -58,6 +58,16 @@ async def list_devices():
     return {"devices": ble_manager.get_all()}
 
 
+@app.post("/api/devices/{device_id}/send")
+async def send_data_to_device(device_id: str, data: dict):
+    """Send data to a specific ESP32 device via TX"""
+    success = await ble_manager.send_tx_data(device_id, data)
+    if success:
+        return {"ok": True, "message": f"Data sent to {device_id}"}
+    else:
+        return {"ok": False, "error": f"Failed to send data to {device_id}"}
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
