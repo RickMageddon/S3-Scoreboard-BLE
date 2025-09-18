@@ -111,6 +111,110 @@ Gebruik de voorbeeldcode in `examples/esp32_txrx_example.cpp`. Belangrijke punte
 - ArduinoJson (via Library Manager)
 - ESP32 BLE Arduino (ingebouwd)
 
+## ESP32 BLE Instellingen en Communicatie
+
+Om goed te verbinden met de Raspberry Pi scoreboard-app, moet je ESP32 de volgende instellingen en BLE-structuur gebruiken:
+
+### Service en Characteristic UUIDs
+
+Gebruik exact deze UUIDs in je ESP32-code:
+
+- **Service UUID**  
+  `c9b9a344-a062-4e55-a507-441c7e610e2c`
+
+- **RX Characteristic UUID** (ESP32 → Pi, Pi ontvangt)  
+  `29f80071-9a06-426b-8c26-02ae5df749a4`
+
+- **TX Characteristic UUID** (Pi → ESP32, Pi zendt)  
+  `a43359d2-e50e-43c9-ad86-b77ee5c6524e`
+
+### Vereiste BLE-structuur op de ESP32
+
+- Maak een BLE-service aan met de Service UUID hierboven.
+- Voeg twee characteristics toe:
+  - **RX Characteristic**:  
+    - UUID: `29f80071-9a06-426b-8c26-02ae5df749a4`  
+    - Eigenschappen: `PROPERTY_WRITE`, `PROPERTY_NOTIFY`  
+    - ESP32 stuurt hier data naar de Pi (bijvoorbeeld scores, status, etc.)
+  - **TX Characteristic**:  
+    - UUID: `a43359d2-e50e-43c9-ad86-b77ee5c6524e`  
+    - Eigenschappen: `PROPERTY_READ`, `PROPERTY_WRITE`, `PROPERTY_NOTIFY`  
+    - Pi kan via deze characteristic commando’s of instellingen naar de ESP32 sturen.
+
+### Dataformaat
+
+- **Aanbevolen:** Gebruik JSON als dataformaat voor communicatie.
+  - Voorbeeld van ESP32 naar Pi (RX):
+    ```json
+    {"game_name": "Tafeltennis", "score": 7}
+    ```
+  - Voorbeeld van Pi naar ESP32 (TX):
+    ```json
+    {"command": "reset"}
+    ```
+
+### Overige vereisten
+
+- De ESP32 moet de juiste Service UUID adverteren.
+- Er is geen pincode of pairing vereist; de verbinding moet automatisch tot stand komen.
+- De naam van het ESP32-apparaat maakt niet uit, zolang de Service UUID klopt.
+- Zorg dat de characteristics correct zijn aangemaakt en geadverteerd.
+
+### Voorbeeld ESP32-code (Arduino)
+
+```cpp
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+
+#define SERVICE_UUID        "c9b9a344-a062-4e55-a507-441c7e610e2c"
+#define RX_CHAR_UUID       "29f80071-9a06-426b-8c26-02ae5df749a4"
+#define TX_CHAR_UUID       "a43359d2-e50e-43c9-ad86-b77ee5c6524e"
+
+BLECharacteristic *rxCharacteristic;
+BLECharacteristic *txCharacteristic;
+
+void setup() {
+  BLEDevice::init("Scoreboard-ESP32");
+  BLEServer *pServer = BLEDevice::createServer();
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  rxCharacteristic = pService->createCharacteristic(
+    RX_CHAR_UUID,
+    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY
+  );
+  rxCharacteristic->addDescriptor(new BLE2902());
+
+  txCharacteristic = pService->createCharacteristic(
+    TX_CHAR_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY
+  );
+  txCharacteristic->addDescriptor(new BLE2902());
+
+  pService->start();
+  BLEDevice::startAdvertising();
+}
+
+void loop() {
+  // Voorbeeld: stuur score update naar Pi
+  String scoreJson = "{\"game_name\": \"Tafeltennis\", \"score\": 7}";
+  rxCharacteristic->setValue(scoreJson.c_str());
+  rxCharacteristic->notify();
+  delay(5000);
+}
+```
+
+### Samenvatting
+
+- Gebruik altijd de juiste UUIDs voor service en characteristics.
+- RX = ESP32 stuurt naar Pi, TX = Pi stuurt naar ESP32.
+- Gebruik JSON voor data-uitwisseling.
+- Geen pairing of pincode nodig.
+- De naam van het apparaat is niet belangrijk.
+
+Met deze instellingen werkt de communicatie tussen de ESP32 en de Pi direct en veilig.
+
 ## API
 
 ### REST endpoints
