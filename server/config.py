@@ -15,6 +15,9 @@ SCORE_CHAR_UUID = os.getenv("SCORE_CHAR_UUID", "29f80071-9a06-426b-8c26-02ae5df7
 # Security: Only connect to devices with matching service UUID
 STRICT_SERVICE_FILTER = os.getenv("STRICT_SERVICE_FILTER", "1") in ("1", "true", "True")
 
+# Alternative name for compatibility
+STRICT_SERVICE_UUID_FILTERING = os.getenv("STRICT_SERVICE_UUID_FILTERING", str(int(STRICT_SERVICE_FILTER))) in ("1", "true", "True")
+
 # Security: Allow devices with specific name patterns (when service UUID not in advertisement)
 ALLOWED_DEVICE_NAME_PATTERNS = os.getenv("ALLOWED_DEVICE_NAME_PATTERNS", "scoreboard,game,ble").split(",")
 
@@ -40,3 +43,6 @@ ADVERTISING_NAME = os.getenv("ADVERTISING_NAME", "scoreboard-PI")
 
 # GATT server voor peripheral mode (vereist ENABLE_ADVERTISING=1 en pydbus)
 ENABLE_GATT_SERVER = os.getenv("ENABLE_GATT_SERVER", "0") in ("1", "true", "True")
+
+# Logging level
+LOG_LEVEL = os.getenv("LOG_LEVEL", "WARNING").upper()

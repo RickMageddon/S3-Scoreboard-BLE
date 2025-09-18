@@ -17,6 +17,7 @@ from .config import (
     STRICT_SERVICE_FILTER,
     ALLOWED_DEVICE_NAME_PATTERNS,
     DISABLE_AUTHENTICATION,
+    STRICT_SERVICE_UUID_FILTERING,
 )
 from .models import DeviceState
 from .events import event_bus
@@ -74,20 +75,28 @@ class BLEManager:
             self._clients.clear()
 
     async def _scan_loop(self):
-        logger.info("Starting secure BLE scan loop for service %s", SERVICE_UUID)
+        # Use STRICT_SERVICE_UUID_FILTERING as the primary setting, fallback to STRICT_SERVICE_FILTER for compatibility
+        strict_filtering = STRICT_SERVICE_UUID_FILTERING
+        logger.info("Starting secure BLE scan loop for service %s (strict filtering: %s)", SERVICE_UUID, strict_filtering)
         consecutive_errors = 0
         max_consecutive_errors = 5
         
         while self._running:
             try:
-                # Use service UUID filter in scanner for more efficient discovery
-                found = await BleakScanner.discover(
-                    timeout=10.0,
-                    service_uuids=[SERVICE_UUID] if SERVICE_UUID else None
-                )
+                # Use service UUID filter in scanner for more efficient discovery when strict filtering is enabled
+                if strict_filtering:
+                    found = await BleakScanner.discover(
+                        timeout=10.0,
+                        service_uuids=[SERVICE_UUID] if SERVICE_UUID else None
+                    )
+                else:
+                    found = await BleakScanner.discover()
+                    
                 consecutive_errors = 0  # Reset error counter on successful scan
+                logger.debug("Found %d BLE devices during scan", len(found))
                 
                 tasks = []
+                matched_devices = 0
                 for d in found:
                     if len(self.devices) >= MAX_DEVICES:
                         logger.warning("Maximum device limit (%d) reached", MAX_DEVICES)
@@ -95,6 +104,7 @@ class BLEManager:
                         
                     # Only process devices that pass our security filter
                     if await self._device_matches(d):
+                        matched_devices += 1
                         addr = d.address
                         # Auto-connect to new devices or reconnect to known devices
                         if addr not in self.devices and addr not in self._clients:
@@ -104,7 +114,10 @@ class BLEManager:
                             # Reconnect to previously known device
                             logger.info("Auto-reconnecting to known device: %s (%s)", d.name or "Unknown", addr)
                             tasks.append(asyncio.create_task(self._connect_device(d)))
+                        else:
+                            logger.debug("Device %s already known, skipping", addr)
                 
+                logger.debug("Matched %d devices, connecting to %d new devices", matched_devices, len(tasks))
                 if tasks:
                     results = await asyncio.gather(*tasks, return_exceptions=True)
                     # Log any connection failures
@@ -126,26 +139,46 @@ class BLEManager:
             await asyncio.sleep(SCAN_INTERVAL)
 
     async def _device_matches(self, d: BLEDevice) -> bool:
-        # Strict filter: only connect to devices that advertise our service UUID
+        # Check both filtering settings for compatibility  
+        strict_filtering = STRICT_SERVICE_UUID_FILTERING
+        
+        # Primary filter: devices that advertise our service UUID
         uuids = d.details.get("props", {}).get("UUIDs") if hasattr(d.details, "get") else None  # type: ignore
         if uuids and SERVICE_UUID.lower() in [u.lower() for u in uuids]:
+            logger.debug("Device %s (%s) matches service UUID in advertisement", d.name, d.address)
             return True
         
-        # Check advertisement data for service UUID (more reliable on some platforms)
+        # Check service data and manufacturer data for the service UUID (more reliable on some platforms)
         if hasattr(d, 'metadata') and d.metadata:
+            # Check service data
+            service_data = d.metadata.get('service_data', {})
+            if SERVICE_UUID.lower() in [uuid.lower() for uuid in service_data.keys()]:
+                logger.debug("Device %s (%s) matches service UUID in service data", d.name, d.address)
+                return True
+                
+            # Check service UUIDs list
+            service_uuids = d.metadata.get('service_uuids', [])
+            if SERVICE_UUID.lower() in [uuid.lower() for uuid in service_uuids]:
+                logger.debug("Device %s (%s) matches service UUID in metadata", d.name, d.address)
+                return True
+            
+            # Check advertisement data
             adv_data = d.metadata.get('manufacturer_data', {}) or d.metadata.get('service_data', {})
             if any(SERVICE_UUID.lower() in str(v).lower() for v in adv_data.values()):
+                logger.debug("Device %s (%s) matches service UUID in advertisement data", d.name, d.address)
                 return True
         
         # If strict filtering is disabled, allow name-based matching for specific devices
-        if not STRICT_SERVICE_FILTER:
+        if not strict_filtering:
             device_name = (d.name or "").lower()
             if device_name and any(keyword.strip().lower() in device_name for keyword in ALLOWED_DEVICE_NAME_PATTERNS):
                 logger.info("Attempting connection to name-matched device: %s", d.name)
                 return True
+            logger.debug("Device %s (%s) allowed due to disabled strict filtering", d.name, d.address)
+            return True
             
-        # SECURITY: No fallback - reject unknown devices
-        logger.debug("Rejecting device %s (%s) - no matching service UUID or name pattern", d.name or "Unknown", d.address)
+        # SECURITY: No fallback when strict filtering is enabled - reject unknown devices
+        logger.debug("Device %s (%s) does not advertise required service UUID %s", d.name or "Unknown", d.address, SERVICE_UUID)
         return False
 
     async def _connect_device(self, d: BLEDevice):
