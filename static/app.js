@@ -11,21 +11,43 @@ async function loadServerInfo() {
     }
     const info = await response.json();
     
-    const macEl = document.querySelector('#mac-address span');
-    const serviceEl = document.querySelector('#service-uuid span');
+    console.log('Server info loaded:', info);
     
-    if (macEl) macEl.textContent = info.mac_address;
-    if (serviceEl) {
-      serviceEl.textContent = info.service_uuid.substring(0, 8) + '...';
-      serviceEl.title = `Service: ${info.service_uuid}\nRX: ${info.characteristics.rx.uuid}\nTX: ${info.characteristics.tx.uuid}`;
+    // MAC address
+    const macEl = document.querySelector('#mac-address .value');
+    if (macEl) {
+      macEl.textContent = info.mac_address;
+      macEl.parentElement.title = `Bluetooth MAC: ${info.mac_address}`;
     }
+    
+    // Service UUID
+    const serviceEl = document.querySelector('#service-uuid .value');
+    if (serviceEl) {
+      const shortUuid = info.service_uuid.substring(0, 13) + '...';
+      serviceEl.textContent = shortUuid;
+      serviceEl.parentElement.title = `Service UUID: ${info.service_uuid}\nDevice: ${info.device_name}`;
+    }
+    
+    // Characteristics
+    const charsEl = document.querySelector('#characteristics .value');
+    if (charsEl) {
+      charsEl.textContent = 'RX + TX';
+      const rxUuid = info.characteristics.rx.uuid;
+      const txUuid = info.characteristics.tx.uuid;
+      charsEl.parentElement.title = 
+        `RX (${info.characteristics.rx.direction}):\n${rxUuid}\n${info.characteristics.rx.description}\n\n` +
+        `TX (${info.characteristics.tx.direction}):\n${txUuid}\n${info.characteristics.tx.description}`;
+    }
+    
   } catch (e) {
-    console.warn('Could not load server info:', e);
+    console.error('Could not load server info:', e);
     // Zet fallback waarden
-    const macEl = document.querySelector('#mac-address span');
-    const serviceEl = document.querySelector('#service-uuid span');
-    if (macEl) macEl.textContent = 'N/A';
-    if (serviceEl) serviceEl.textContent = 'N/A';
+    const macEl = document.querySelector('#mac-address .value');
+    const serviceEl = document.querySelector('#service-uuid .value');
+    const charsEl = document.querySelector('#characteristics .value');
+    if (macEl) macEl.textContent = 'Fout';
+    if (serviceEl) serviceEl.textContent = 'Fout';
+    if (charsEl) charsEl.textContent = 'Fout';
   }
 }
 

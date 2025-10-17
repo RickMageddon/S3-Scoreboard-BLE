@@ -67,32 +67,63 @@ async def server_info():
     from .config import SERVICE_UUID, RX_CHAR_UUID, TX_CHAR_UUID, ADVERTISING_NAME
     
     # Get Bluetooth MAC address
-    mac_address = "N/A (Windows/development mode)"
+    mac_address = "Unknown"
     
     # Only try to get MAC on Linux (where Raspberry Pi runs)
     if platform.system() == "Linux":
         try:
-            # Try to get MAC address from hci0 on Linux
-            result = subprocess.run(['hciconfig', 'hci0'], capture_output=True, text=True, timeout=1)
+            # Method 1: Try hciconfig
+            result = subprocess.run(['hciconfig', 'hci0'], capture_output=True, text=True, timeout=2)
             if result.returncode == 0:
-                match = re.search(r'BD Address: ([0-9A-F:]{17})', result.stdout, re.IGNORECASE)
+                match = re.search(r'BD Address:\s*([0-9A-F:]{17})', result.stdout, re.IGNORECASE)
                 if match:
                     mac_address = match.group(1)
-        except Exception:
+                    logging.debug("MAC from hciconfig: %s", mac_address)
+        except Exception as e:
+            logging.debug("hciconfig failed: %s", e)
+        
+        # Method 2: Try sysfs if hciconfig failed
+        if mac_address == "Unknown":
             try:
-                # Fallback: try reading from sysfs
                 with open('/sys/class/bluetooth/hci0/address', 'r') as f:
-                    mac_address = f.read().strip()
-            except Exception:
-                mac_address = "Unknown (hciconfig not available)"
+                    mac_address = f.read().strip().upper()
+                    logging.debug("MAC from sysfs: %s", mac_address)
+            except Exception as e:
+                logging.debug("sysfs read failed: %s", e)
+        
+        # Method 3: Try bluetoothctl
+        if mac_address == "Unknown":
+            try:
+                result = subprocess.run(['bluetoothctl', 'show'], capture_output=True, text=True, timeout=2)
+                if result.returncode == 0:
+                    # Look for line like "Controller XX:XX:XX:XX:XX:XX"
+                    for line in result.stdout.split('\n'):
+                        if 'Controller' in line:
+                            match = re.search(r'([0-9A-F:]{17})', line, re.IGNORECASE)
+                            if match:
+                                mac_address = match.group(1)
+                                logging.debug("MAC from bluetoothctl: %s", mac_address)
+                                break
+            except Exception as e:
+                logging.debug("bluetoothctl failed: %s", e)
+    else:
+        mac_address = "N/A (Windows/development mode)"
     
     return {
         "mac_address": mac_address,
         "device_name": ADVERTISING_NAME,
         "service_uuid": SERVICE_UUID,
         "characteristics": {
-            "rx": {"uuid": RX_CHAR_UUID, "description": "Pi ontvangt data van ESP32 (game naam, score)"},
-            "tx": {"uuid": TX_CHAR_UUID, "description": "Pi stuurt commando's naar ESP32"}
+            "rx": {
+                "uuid": RX_CHAR_UUID, 
+                "description": "Pi ontvangt data van ESP32 (game naam, score)",
+                "direction": "ESP32 → Pi"
+            },
+            "tx": {
+                "uuid": TX_CHAR_UUID, 
+                "description": "Pi stuurt commando's naar ESP32",
+                "direction": "Pi → ESP32"
+            }
         }
     }
 
