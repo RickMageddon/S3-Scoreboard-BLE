@@ -80,37 +80,35 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
 };
 
 // TX Characteristic callback (Pi -> ESP32 commando's)
-class MyTxCallbacks: public BLERemoteCharacteristicCallbacks {
-    void onNotify(BLERemoteCharacteristic* pChar, uint8_t* pData, size_t length, bool isNotify) {
-        String rxValue = "";
-        for(int i = 0; i < length; i++) {
-            rxValue += (char)pData[i];
-        }
+void notifyCallback(BLERemoteCharacteristic* pChar, uint8_t* pData, size_t length, bool isNotify) {
+    String rxValue = "";
+    for(int i = 0; i < length; i++) {
+        rxValue += (char)pData[i];
+    }
+    
+    if (rxValue.length() > 0) {
+        Serial.println("📩 TX van Pi: " + rxValue);
         
-        if (rxValue.length() > 0) {
-            Serial.println("📩 TX van Pi: " + rxValue);
+        // Parse JSON commando van Pi
+        DynamicJsonDocument doc(1024);
+        DeserializationError error = deserializeJson(doc, rxValue);
+        
+        if (!error && doc.containsKey("command")) {
+            String command = doc["command"];
             
-            // Parse JSON commando van Pi
-            DynamicJsonDocument doc(1024);
-            DeserializationError error = deserializeJson(doc, rxValue);
-            
-            if (!error && doc.containsKey("command")) {
-                String command = doc["command"];
-                
-                if (command == "reset") {
-                    currentScore = 0;
-                    Serial.println("🔄 Score gereset door Pi");
-                    sendGameState(); // Bevestig reset
-                }
-                else if (command == "set_game") {
-                    gameName = doc["game_name"].as<String>();
-                    Serial.println("🎮 Game naam gewijzigd: " + gameName);
-                    sendGameState(); // Bevestig wijziging
-                }
+            if (command == "reset") {
+                currentScore = 0;
+                Serial.println("🔄 Score gereset door Pi");
+                sendGameState(); // Bevestig reset
+            }
+            else if (command == "set_game") {
+                gameName = doc["game_name"].as<String>();
+                Serial.println("🎮 Game naam gewijzigd: " + gameName);
+                sendGameState(); // Bevestig wijziging
             }
         }
     }
-};
+}
 
 // Verbind met Pi server
 bool connectToServer() {
@@ -148,9 +146,9 @@ bool connectToServer() {
     if (pTxChar != nullptr) {
         Serial.println("✅ TX Characteristic gevonden!");
         
-        // Subscribe voor Pi commando's
+        // Subscribe voor Pi commando's met callback functie
         if(pTxChar->canNotify()) {
-            pTxChar->registerForNotify(new MyTxCallbacks());
+            pTxChar->registerForNotify(notifyCallback);
             Serial.println("✅ Subscribed op TX notifications");
         }
     }
