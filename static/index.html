@@ -3,6 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <title>S3 Scoreboard BLE</title>
   <link rel="stylesheet" href="/static/styles.css" />
   </head>
@@ -14,10 +17,13 @@
           <span class="label">MAC:</span> <span class="value">laden...</span>
         </div>
         <div id="service-uuid" class="info-item" title="BLE Service UUID">
-          <span class="label">Service:</span> <span class="value">laden...</span>
+          <span class="label">Service UUID:</span> <span class="value">laden...</span>
         </div>
-        <div id="characteristics" class="info-item" title="BLE Characteristics">
-          <span class="label">Chars:</span> <span class="value">laden...</span>
+        <div id="rx-char" class="info-item" title="RX Characteristic - ESP32 naar Pi">
+          <span class="label">RX:</span> <span class="value">laden...</span>
+        </div>
+        <div id="tx-char" class="info-item" title="TX Characteristic - Pi naar ESP32">
+          <span class="label">TX:</span> <span class="value">laden...</span>
         </div>
       </div>
       <div id="status" class="status">Verbinden...</div>
@@ -28,6 +34,6 @@
     <footer>
       <small>Live BLE scoreboard - max 54 apparaten</small>
     </footer>
-  <script src="/static/app.js" type="module"></script>
+  <script src="/static/app.js"></script>
   </body>
 </html>

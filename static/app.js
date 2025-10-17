@@ -4,7 +4,9 @@ let devices = new Map();
 
 // Fetch and display server info
 async function loadServerInfo() {
+  console.log('loadServerInfo() called');
   try {
+    console.log('Fetching /api/server/info...');
     const response = await fetch('/api/server/info');
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -18,36 +20,46 @@ async function loadServerInfo() {
     if (macEl) {
       macEl.textContent = info.mac_address;
       macEl.parentElement.title = `Bluetooth MAC: ${info.mac_address}`;
+      console.log('MAC address set to:', info.mac_address);
     }
     
-    // Service UUID
+    // Service UUID (volledige UUID)
     const serviceEl = document.querySelector('#service-uuid .value');
     if (serviceEl) {
-      const shortUuid = info.service_uuid.substring(0, 13) + '...';
-      serviceEl.textContent = shortUuid;
-      serviceEl.parentElement.title = `Service UUID: ${info.service_uuid}\nDevice: ${info.device_name}`;
+      serviceEl.textContent = info.service_uuid;
+      serviceEl.parentElement.title = `Service UUID\nDevice: ${info.device_name}`;
+      console.log('Service UUID set to:', info.service_uuid);
     }
     
-    // Characteristics
-    const charsEl = document.querySelector('#characteristics .value');
-    if (charsEl) {
-      charsEl.textContent = 'RX + TX';
-      const rxUuid = info.characteristics.rx.uuid;
-      const txUuid = info.characteristics.tx.uuid;
-      charsEl.parentElement.title = 
-        `RX (${info.characteristics.rx.direction}):\n${rxUuid}\n${info.characteristics.rx.description}\n\n` +
-        `TX (${info.characteristics.tx.direction}):\n${txUuid}\n${info.characteristics.tx.description}`;
+    // RX Characteristic UUID
+    const rxEl = document.querySelector('#rx-char .value');
+    if (rxEl) {
+      rxEl.textContent = info.characteristics.rx.uuid;
+      rxEl.parentElement.title = `RX Characteristic (${info.characteristics.rx.direction})\n${info.characteristics.rx.description}`;
+      console.log('RX UUID set to:', info.characteristics.rx.uuid);
     }
+    
+    // TX Characteristic UUID
+    const txEl = document.querySelector('#tx-char .value');
+    if (txEl) {
+      txEl.textContent = info.characteristics.tx.uuid;
+      txEl.parentElement.title = `TX Characteristic (${info.characteristics.tx.direction})\n${info.characteristics.tx.description}`;
+      console.log('TX UUID set to:', info.characteristics.tx.uuid);
+    }
+    
+    console.log('Server info display complete!');
     
   } catch (e) {
     console.error('Could not load server info:', e);
     // Zet fallback waarden
     const macEl = document.querySelector('#mac-address .value');
     const serviceEl = document.querySelector('#service-uuid .value');
-    const charsEl = document.querySelector('#characteristics .value');
+    const rxEl = document.querySelector('#rx-char .value');
+    const txEl = document.querySelector('#tx-char .value');
     if (macEl) macEl.textContent = 'Fout';
     if (serviceEl) serviceEl.textContent = 'Fout';
-    if (charsEl) charsEl.textContent = 'Fout';
+    if (rxEl) rxEl.textContent = 'Fout';
+    if (txEl) txEl.textContent = 'Fout';
   }
 }
 
@@ -147,5 +159,17 @@ function animateScoreChange(id, newScore) {
 }
 
 // Load server info on page load
-loadServerInfo();
-connectWs();
+console.log('App.js loaded, starting initialization...');
+
+// Wait for DOM to be ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+
+function init() {
+  console.log('Initializing app...');
+  loadServerInfo();
+  connectWs();
+}
