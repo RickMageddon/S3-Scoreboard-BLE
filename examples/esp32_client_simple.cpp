@@ -1,8 +1,12 @@
 /*
- * ESP32 BLE Client - Simpel voorbeeld voor S3 Scoreboard
+ * ESP32 BLE Server - S3 Scoreboard
  * 
- * Deze client scant naar de Raspberry Pi scoreboard server en verbindt automatisch.
- * Stuurt periodiek score updates naar de Pi via de RX characteristic.
+ * ESP32 werkt als BLE PERIPHERAL (server) waar de Raspberry Pi mee verbindt.
+ * De Pi (BLE central/client) scant naar ESP32's en ontvangt de score data.
+ * 
+ * Architectuur:
+ * - ESP32 = BLE Server/Peripheral (adverteert, heeft characteristics)
+ * - Raspberry Pi = BLE Client/Central (scant, verbindt, ontvangt data)
  * 
  * Vereisten:
  * - ESP32 board
@@ -15,20 +19,19 @@
  * 4. Upload naar ESP32
  * 
  * Werking:
- * - ESP32 scant naar BLE server met SERVICE_UUID
- * - Verbindt automatisch wanneer gevonden
- * - Stuurt elke 5 seconden een score update
- * - Herstelt verbinding automatisch bij disconnect
+ * - ESP32 adverteert als BLE server met SERVICE_UUID
+ * - Raspberry Pi vindt en verbindt met ESP32
+ * - ESP32 stuurt score updates via notify
+ * - Pi ontvangt en toont op dashboard
  */
 
 #include <BLEDevice.h>
+#include <BLEServer.h>
 #include <BLEUtils.h>
-#include <BLEScan.h>
-#include <BLEAdvertisedDevice.h>
-#include <BLEClient.h>
+#include <BLE2902.h>
 #include <ArduinoJson.h>
 
-// UUIDs moeten matchen met server configuratie
+// UUIDs moeten matchen met Pi configuratie
 #define SERVICE_UUID        "c9b9a344-a062-4e55-a507-441c7e610e2c"
 #define RX_CHAR_UUID        "29f80071-9a06-426b-8c26-02ae5df749a4"  // Pi ontvangt (ESP32 -> Pi)
 #define TX_CHAR_UUID        "a43359d2-e50e-43c9-ad86-b77ee5c6524e"  // Pi stuurt (Pi -> ESP32)
@@ -40,115 +43,58 @@ unsigned long lastUpdate = 0;
 const unsigned long UPDATE_INTERVAL = 5000; // Update elke 5 seconden
 
 // BLE objecten
-BLEScan* pBLEScan = nullptr;
-BLEClient* pClient = nullptr;
-BLERemoteCharacteristic* pRxChar = nullptr;
-BLERemoteCharacteristic* pTxChar = nullptr;
-BLEAdvertisedDevice* targetDevice = nullptr;
+BLEServer* pServer = nullptr;
+BLECharacteristic* pRxChar = nullptr;
+BLECharacteristic* pTxChar = nullptr;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
 
-bool isConnected = false;
-bool doConnect = false;
-bool doScan = false;
+// Server callbacks voor verbindingsstatus
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+        deviceConnected = true;
+        Serial.println("� Pi verbonden!");
+    };
 
-// Callback voor TX characteristic (data van Pi)
-static void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic,
-                            uint8_t* pData, size_t length, bool isNotify) {
-    String rxValue = String((char*)pData).substring(0, length);
-    Serial.println("📩 TX van Pi: " + rxValue);
-    
-    // Parse JSON commando van Pi
-    DynamicJsonDocument doc(1024);
-    DeserializationError error = deserializeJson(doc, rxValue);
-    
-    if (!error && doc.containsKey("command")) {
-        String command = doc["command"];
-        
-        if (command == "reset") {
-            currentScore = 0;
-            Serial.println("🔄 Score gereset door Pi");
-        }
-        else if (command == "set_game") {
-            gameName = doc["game_name"].as<String>();
-            Serial.println("🎮 Game naam gewijzigd: " + gameName);
-        }
+    void onDisconnect(BLEServer* pServer) {
+        deviceConnected = false;
+        Serial.println("� Pi losgekoppeld!");
     }
-}
+};
 
-// Callback voor gevonden BLE devices tijdens scan
-class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
-    void onResult(BLEAdvertisedDevice advertisedDevice) {
-        Serial.print("🔍 Gevonden BLE device: ");
-        Serial.println(advertisedDevice.toString().c_str());
-
-        // Check of dit onze scoreboard server is
-        if (advertisedDevice.haveServiceUUID() && 
-            advertisedDevice.isAdvertisingService(BLEUUID(SERVICE_UUID))) {
+// TX Characteristic callback (Pi -> ESP32)
+class MyTxCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+        String rxValue = pCharacteristic->getValue().c_str();
+        
+        if (rxValue.length() > 0) {
+            Serial.println("📩 TX van Pi: " + rxValue);
             
-            Serial.println("✅ Scoreboard server gevonden!");
-            BLEDevice::getScan()->stop();
-            targetDevice = new BLEAdvertisedDevice(advertisedDevice);
-            doConnect = true;
-            doScan = false;
+            // Parse JSON commando van Pi
+            DynamicJsonDocument doc(1024);
+            DeserializationError error = deserializeJson(doc, rxValue);
+            
+            if (!error && doc.containsKey("command")) {
+                String command = doc["command"];
+                
+                if (command == "reset") {
+                    currentScore = 0;
+                    Serial.println("🔄 Score gereset door Pi");
+                    sendGameState(); // Bevestig reset
+                }
+                else if (command == "set_game") {
+                    gameName = doc["game_name"].as<String>();
+                    Serial.println("🎮 Game naam gewijzigd: " + gameName);
+                    sendGameState(); // Bevestig wijziging
+                }
+            }
         }
     }
 };
 
-// Verbind met de Pi server
-bool connectToServer() {
-    Serial.println("🔗 Verbinden met Pi server...");
-    
-    pClient = BLEDevice::createClient();
-    Serial.println(" - Client aangemaakt");
-
-    // Verbind met de remote BLE server
-    if (!pClient->connect(targetDevice)) {
-        Serial.println("❌ Verbinding mislukt");
-        return false;
-    }
-    Serial.println("✅ Verbonden met Pi!");
-
-    // Verkrijg referentie naar de service
-    BLERemoteService* pRemoteService = pClient->getService(SERVICE_UUID);
-    if (pRemoteService == nullptr) {
-        Serial.println("❌ Service niet gevonden");
-        pClient->disconnect();
-        return false;
-    }
-    Serial.println("✅ Service gevonden");
-
-    // Verkrijg referentie naar RX characteristic (ESP32 -> Pi)
-    pRxChar = pRemoteService->getCharacteristic(RX_CHAR_UUID);
-    if (pRxChar == nullptr) {
-        Serial.println("❌ RX Characteristic niet gevonden");
-        pClient->disconnect();
-        return false;
-    }
-    Serial.println("✅ RX Characteristic gevonden");
-
-    // Verkrijg referentie naar TX characteristic (Pi -> ESP32)
-    pTxChar = pRemoteService->getCharacteristic(TX_CHAR_UUID);
-    if (pTxChar != nullptr) {
-        Serial.println("✅ TX Characteristic gevonden");
-        
-        // Registreer notify callback voor commando's van Pi
-        if (pTxChar->canNotify()) {
-            pTxChar->registerForNotify(notifyCallback);
-            Serial.println("✅ TX notificaties ingeschakeld");
-        }
-    }
-
-    isConnected = true;
-    Serial.println("🎉 Volledig verbonden en klaar!");
-    
-    // Stuur initiële game state
-    sendGameState();
-    
-    return true;
-}
-
 // Stuur volledige game state naar Pi
 void sendGameState() {
-    if (!isConnected || pRxChar == nullptr) {
+    if (!deviceConnected || pRxChar == nullptr) {
         return;
     }
 
@@ -160,14 +106,15 @@ void sendGameState() {
     String jsonString;
     serializeJson(doc, jsonString);
     
-    pRxChar->writeValue(jsonString.c_str(), jsonString.length());
+    pRxChar->setValue(jsonString.c_str());
+    pRxChar->notify();
     
     Serial.println("📤 Volledige state verzonden: " + jsonString);
 }
 
 // Stuur alleen score update naar Pi
 void sendScoreUpdate() {
-    if (!isConnected || pRxChar == nullptr) {
+    if (!deviceConnected || pRxChar == nullptr) {
         return;
     }
 
@@ -177,7 +124,8 @@ void sendScoreUpdate() {
     String jsonString;
     serializeJson(doc, jsonString);
     
-    pRxChar->writeValue(jsonString.c_str(), jsonString.length());
+    pRxChar->setValue(jsonString.c_str());
+    pRxChar->notify();
     
     Serial.println("📤 Score update: " + String(currentScore));
 }
@@ -185,51 +133,78 @@ void sendScoreUpdate() {
 void setup() {
     Serial.begin(115200);
     Serial.println("\n\n╔════════════════════════════════════════╗");
-    Serial.println("║  ESP32 BLE Client - S3 Scoreboard    ║");
+    Serial.println("║  ESP32 BLE Server - S3 Scoreboard    ║");
     Serial.println("╚════════════════════════════════════════╝\n");
     
     Serial.println("Game: " + gameName);
     Serial.println("Startwaarde score: " + String(currentScore));
     Serial.println();
 
-    // Initialiseer BLE
-    BLEDevice::init("ESP32-Client");
+    // Initialiseer BLE Device
+    BLEDevice::init("ESP32-Scoreboard");
     
-    // Scan opzetten
-    pBLEScan = BLEDevice::getScan();
-    pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
-    pBLEScan->setActiveScan(true);
-    pBLEScan->setInterval(100);
-    pBLEScan->setWindow(99);
+    // Maak BLE Server
+    pServer = BLEDevice::createServer();
+    pServer->setCallbacks(new MyServerCallbacks());
+
+    // Maak BLE Service
+    BLEService *pService = pServer->createService(SERVICE_UUID);
+
+    // RX Characteristic: ESP32 stuurt data naar Pi (notify)
+    pRxChar = pService->createCharacteristic(
+                        RX_CHAR_UUID,
+                        BLECharacteristic::PROPERTY_READ   |
+                        BLECharacteristic::PROPERTY_WRITE  |
+                        BLECharacteristic::PROPERTY_NOTIFY
+                      );
+    pRxChar->addDescriptor(new BLE2902());
+
+    // TX Characteristic: Pi stuurt commando's naar ESP32 (write)
+    pTxChar = pService->createCharacteristic(
+                        TX_CHAR_UUID,
+                        BLECharacteristic::PROPERTY_READ   |
+                        BLECharacteristic::PROPERTY_WRITE
+                      );
+    pTxChar->setCallbacks(new MyTxCallbacks());
+    pTxChar->addDescriptor(new BLE2902());
+
+    // Start service
+    pService->start();
+
+    // Start advertising
+    BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+    pAdvertising->addServiceUUID(SERVICE_UUID);
+    pAdvertising->setScanResponse(false);
+    pAdvertising->setMinPreferred(0x0);  // iOS connection fix
+    BLEDevice::startAdvertising();
     
-    Serial.println("🔍 Starten met scannen naar Pi server...");
+    Serial.println("� BLE Server gestart - wacht op Pi verbinding...");
     Serial.println("Service UUID: " + String(SERVICE_UUID));
-    doScan = true;
+    Serial.println("RX Char UUID: " + String(RX_CHAR_UUID) + " (ESP32 -> Pi)");
+    Serial.println("TX Char UUID: " + String(TX_CHAR_UUID) + " (Pi -> ESP32)");
+    Serial.println();
+    
+    // Stuur initiële game state
+    sendGameState();
 }
 
 void loop() {
-    // Als we moeten verbinden met de gevonden server
-    if (doConnect) {
-        if (connectToServer()) {
-            Serial.println("💚 Nu verbonden met scoreboard!");
-        } else {
-            Serial.println("❌ Verbinding mislukt, opnieuw scannen...");
-            doScan = true;
-        }
-        doConnect = false;
+    // Als disconnected, herstart advertising
+    if (!deviceConnected && oldDeviceConnected) {
+        delay(500); // Geef BLE stack tijd om op te schonen
+        pServer->startAdvertising();
+        Serial.println("📡 Herstart advertising - wacht op verbinding...");
+        oldDeviceConnected = deviceConnected;
     }
-
-    // Als we verbonden zijn, stuur periodieke updates
-    if (isConnected) {
-        // Check of verbinding nog actief is
-        if (!pClient->isConnected()) {
-            isConnected = false;
-            Serial.println("💔 Verbinding verbroken!");
-            Serial.println("🔍 Opnieuw scannen...");
-            doScan = true;
-            return;
-        }
-        
+    
+    // Als nieuwe verbinding
+    if (deviceConnected && !oldDeviceConnected) {
+        Serial.println("✅ Pi verbonden!");
+        oldDeviceConnected = deviceConnected;
+    }
+    
+    // Periodiek score updates sturen wanneer verbonden
+    if (deviceConnected) {
         // Stuur periodieke score updates
         if (millis() - lastUpdate > UPDATE_INTERVAL) {
             // Simuleer score wijziging
@@ -238,20 +213,7 @@ void loop() {
             lastUpdate = millis();
         }
     }
-    // Anders scannen naar de server
-    else if (doScan) {
-        Serial.println("🔍 Scannen...");
-        BLEScanResults foundDevices = pBLEScan->start(5, false);
-        Serial.print("Scan voltooid, ");
-        Serial.print(foundDevices.getCount());
-        Serial.println(" devices gevonden");
-        pBLEScan->clearResults();
-        
-        if (!doConnect) {
-            delay(2000); // Wacht voordat we opnieuw scannen
-        }
-    }
-
+    
     delay(100);
 }
 
