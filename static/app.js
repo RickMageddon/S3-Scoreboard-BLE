@@ -2,6 +2,25 @@ const grid = document.getElementById('grid');
 const statusEl = document.getElementById('status');
 let devices = new Map();
 
+// Fetch and display server info
+async function loadServerInfo() {
+  try {
+    const response = await fetch('/api/server/info');
+    const info = await response.json();
+    
+    const macEl = document.querySelector('#mac-address span');
+    const serviceEl = document.querySelector('#service-uuid span');
+    
+    if (macEl) macEl.textContent = info.mac_address;
+    if (serviceEl) {
+      serviceEl.textContent = info.service_uuid;
+      serviceEl.title = `RX: ${info.characteristics.rx.uuid}\nTX: ${info.characteristics.tx.uuid}`;
+    }
+  } catch (e) {
+    console.warn('Could not load server info:', e);
+  }
+}
+
 function render() {
   // Remove tiles not present
   for (const [id, tile] of [...devices.entries()]) {
@@ -97,4 +116,6 @@ function animateScoreChange(id, newScore) {
   }
 }
 
+// Load server info on page load
+loadServerInfo();
 connectWs();

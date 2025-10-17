@@ -58,6 +58,42 @@ async def list_devices():
     return {"devices": ble_manager.get_all()}
 
 
+@app.get("/api/server/info")
+async def server_info():
+    """Get server information including MAC address and configured characteristics"""
+    import subprocess
+    import re
+    from .config import SERVICE_UUID, RX_CHAR_UUID, TX_CHAR_UUID, ADVERTISING_NAME
+    
+    # Get Bluetooth MAC address
+    mac_address = "Unknown"
+    try:
+        # Try to get MAC address from hci0 on Linux
+        result = subprocess.run(['hciconfig', 'hci0'], capture_output=True, text=True, timeout=2)
+        if result.returncode == 0:
+            match = re.search(r'BD Address: ([0-9A-F:]{17})', result.stdout, re.IGNORECASE)
+            if match:
+                mac_address = match.group(1)
+    except Exception as e:
+        logger.debug("Could not get MAC address: %s", e)
+        try:
+            # Fallback: try reading from sysfs
+            with open('/sys/class/bluetooth/hci0/address', 'r') as f:
+                mac_address = f.read().strip()
+        except Exception:
+            pass
+    
+    return {
+        "mac_address": mac_address,
+        "device_name": ADVERTISING_NAME,
+        "service_uuid": SERVICE_UUID,
+        "characteristics": {
+            "rx": {"uuid": RX_CHAR_UUID, "description": "Pi ontvangt data van ESP32 (game naam, score)"},
+            "tx": {"uuid": TX_CHAR_UUID, "description": "Pi stuurt commando's naar ESP32"}
+        }
+    }
+
+
 @app.post("/api/devices/{device_id}/send")
 async def send_data_to_device(device_id: str, data: dict):
     """Send data to a specific ESP32 device via TX"""
