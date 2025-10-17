@@ -63,25 +63,28 @@ async def server_info():
     """Get server information including MAC address and configured characteristics"""
     import subprocess
     import re
+    import platform
     from .config import SERVICE_UUID, RX_CHAR_UUID, TX_CHAR_UUID, ADVERTISING_NAME
     
     # Get Bluetooth MAC address
-    mac_address = "Unknown"
-    try:
-        # Try to get MAC address from hci0 on Linux
-        result = subprocess.run(['hciconfig', 'hci0'], capture_output=True, text=True, timeout=2)
-        if result.returncode == 0:
-            match = re.search(r'BD Address: ([0-9A-F:]{17})', result.stdout, re.IGNORECASE)
-            if match:
-                mac_address = match.group(1)
-    except Exception as e:
-        logger.debug("Could not get MAC address: %s", e)
+    mac_address = "N/A (Windows/development mode)"
+    
+    # Only try to get MAC on Linux (where Raspberry Pi runs)
+    if platform.system() == "Linux":
         try:
-            # Fallback: try reading from sysfs
-            with open('/sys/class/bluetooth/hci0/address', 'r') as f:
-                mac_address = f.read().strip()
+            # Try to get MAC address from hci0 on Linux
+            result = subprocess.run(['hciconfig', 'hci0'], capture_output=True, text=True, timeout=1)
+            if result.returncode == 0:
+                match = re.search(r'BD Address: ([0-9A-F:]{17})', result.stdout, re.IGNORECASE)
+                if match:
+                    mac_address = match.group(1)
         except Exception:
-            pass
+            try:
+                # Fallback: try reading from sysfs
+                with open('/sys/class/bluetooth/hci0/address', 'r') as f:
+                    mac_address = f.read().strip()
+            except Exception:
+                mac_address = "Unknown (hciconfig not available)"
     
     return {
         "mac_address": mac_address,
