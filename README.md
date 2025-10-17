@@ -2,6 +2,35 @@
 
 Een webinterface die in real-time scoreboards toont van BLE-apparaten die verbonden zijn met een Raspberry Pi 4. De interface toont maximaal 54 apparaten in een 9x6 grid layout.
 
+## 🚀 Quick Start
+
+```bash
+# Op Raspberry Pi:
+git clone https://github.com/RickMageddon/S3-Scoreboard-BLE.git
+cd S3-Scoreboard-BLE
+chmod +x install.sh
+./install.sh
+sudo reboot
+
+# Na herstart:
+python3 -m server.main
+```
+
+Open browser: `http://[PI-IP]:8000` 🎉
+
+## 🏗️ Architectuur
+
+**Raspberry Pi** = BLE Server (peripheral)
+- Adverteert als `S3-Scoreboard`
+- Ontvangt scores van ESP32 clients
+- Toont alles op web dashboard
+
+**ESP32's** = BLE Clients (central)
+- Scannen naar Pi server
+- Verbinden automatisch
+- Sturen game data (JSON)
+- Geen WiFi nodig!
+
 ## Hoe het werkt
 
 De Raspberry Pi draait een Python backend die:
@@ -73,43 +102,132 @@ Standaard instellingen:
 
 ## Installatie
 
-### Raspberry Pi setup
+### 🚀 Snelle installatie (Raspberry Pi als BLE Server)
+
+De Raspberry Pi fungeert als BLE server waar ESP32 clients automatisch mee verbinden.
+
+#### Stap 1: Clone repository
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+cd ~
+git clone https://github.com/RickMageddon/S3-Scoreboard-BLE.git
+cd S3-Scoreboard-BLE
+```
+
+#### Stap 2: Run installatiescript
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+Dit installeert alles wat nodig is:
+- Bluetooth packages (bluez, etc.)
+- Python dependencies (systeem-breed, geen venv)
+- GATT server dependencies (pydbus)
+- Maakt `.env` configuratie aan
+- Stelt Bluetooth rechten in
+
+#### Stap 3: Herstart Pi
+```bash
+sudo reboot
+```
+
+#### Stap 4: Start server
+```bash
+cd ~/S3-Scoreboard-BLE
+python3 -m server.main
+```
+
+De server draait nu op: `http://[PI-IP]:8000`
+
+### 🔄 Als systemd service (automatisch opstarten)
+
+Om de server automatisch te starten bij elke boot:
+
+```bash
+cd ~/S3-Scoreboard-BLE
+chmod +x install_service.sh
+sudo ./install_service.sh
+```
+
+Dan hoef je niet meer handmatig te starten!
+
+**Handige commando's:**
+```bash
+# Status bekijken
+sudo systemctl status s3-scoreboard
+
+# Live logs
+sudo journalctl -u s3-scoreboard -f
+
+# Herstarten
+sudo systemctl restart s3-scoreboard
 ```
 
 ### Configuratie
-Kopieer `.env.example` naar `.env` en pas aan indien nodig:
+
+Het installatiescript maakt automatisch een `.env` bestand aan met de juiste instellingen:
+
 ```bash
+# Pi als BLE Server
+ENABLE_ADVERTISING=1
+ENABLE_GATT_SERVER=1
+ADVERTISING_NAME=S3-Scoreboard
+
+# Service en Characteristics
 SCOREBOARD_SERVICE_UUID=c9b9a344-a062-4e55-a507-441c7e610e2c
 RX_CHAR_UUID=29f80071-9a06-426b-8c26-02ae5df749a4
 TX_CHAR_UUID=a43359d2-e50e-43c9-ad86-b77ee5c6524e
-STRICT_SERVICE_FILTER=1
+
+# Automatisch verbinden zonder pairing
+DISABLE_AUTHENTICATION=1
 ```
 
-### Server starten
-```bash
-python -m server.main
+Je kunt deze aanpassen in het `.env` bestand indien nodig.
+
+### Dashboard openen
+
+Na het starten is de webinterface bereikbaar op:
+- Op de Pi zelf: `http://localhost:8000`
+- Vanaf ander apparaat: `http://[PI-IP-ADRES]:8000`
+
+Vind je Pi IP-adres met: `hostname -I`
+
+## ESP32 Client Implementatie
+
+De ESP32's werken als **BLE clients** die verbinden met de Raspberry Pi **BLE server**.
+
+### 🎯 Twee opties:
+
+#### Optie 1: Simpele Client (AANBEVOLEN) ⭐
+Gebruik `examples/esp32_client_simple.cpp` - ESP32 scant naar Pi en verbindt automatisch:
+
+```cpp
+// ESP32 zoekt Pi server en verbindt
+BLEClient* pClient = BLEDevice::createClient();
+pClient->connect(piServerAddress);
 ```
 
-De webinterface is bereikbaar op `http://localhost:8000`
+**Voordelen:**
+- ✅ Zeer eenvoudig
+- ✅ Automatische verbinding
+- ✅ Automatisch herverbinden bij disconnect
+- ✅ Kant-en-klaar JSON communicatie
 
-## ESP32 implementatie
+#### Optie 2: Server Mode (voor geavanceerden)
+Gebruik `examples/esp32_txrx_example.cpp` - ESP32 als server, Pi verbindt ernaar:
 
-Gebruik de voorbeeldcode in `examples/esp32_txrx_example.cpp`. Belangrijke punten:
+```cpp
+// ESP32 adverteert, Pi verbindt
+BLEServer *pServer = BLEDevice::createServer();
+```
 
-1. Adverteer de juiste Service UUID
-2. Maak twee characteristics aan:
-   - RX (Pi ontvangt): 29f80071-9a06-426b-8c26-02ae5df749a4
-   - TX (Pi stuurt):   a43359d2-e50e-43c9-ad86-b77ee5c6524e
-3. Stuur data in JSON formaat
-4. Device naam maakt niet uit voor beveiliging
+**Let op:** Vereist `STRICT_SERVICE_FILTER=0` in Pi `.env`
 
-### Vereiste libraries
+### 📚 Vereiste Arduino libraries
 - ArduinoJson (via Library Manager)
 - ESP32 BLE Arduino (ingebouwd)
+
+Zie `examples/README.md` voor volledige instructies!
 
 ## ESP32 BLE Instellingen en Communicatie
 
@@ -232,14 +350,65 @@ ws://localhost:8000/ws      # Real-time updates
 
 De Pi kan ook als BLE peripheral fungeren voor verbindingen met telefoons:
 
+### Vereisten
 ```bash
-# In .env:
-ENABLE_ADVERTISING=1
-ENABLE_GATT_SERVER=1
+# Installeer pydbus dependencies
+sudo apt-get install -y python3-gi python3-gi-cairo gir1.2-gtk-3.0 libdbus-1-dev libglib2.0-dev
 
-# Vereist: sudo rechten en pydbus
+# Installeer pydbus in venv
+source .venv/bin/activate
 pip install pydbus
 ```
+
+### Configuratie
+In `.env`:
+```bash
+ENABLE_ADVERTISING=1
+ENABLE_GATT_SERVER=1
+```
+
+**Let op:** Vereist sudo rechten voor sommige D-Bus operaties. Als pydbus installatie problemen geeft, zet `ENABLE_GATT_SERVER=0`.
+
+## Troubleshooting
+
+### pydbus installeert niet
+**Error:** `WARNING server.gatt_server: pydbus niet geïnstalleerd`
+
+**Oplossing:**
+```bash
+# Installeer systeem dependencies
+sudo apt-get install -y python3-gi python3-gi-cairo gir1.2-gtk-3.0 libdbus-1-dev libglib2.0-dev
+
+# Herinstalleer pydbus
+source .venv/bin/activate
+pip uninstall pydbus
+pip install pydbus --no-cache-dir
+```
+
+Of schakel GATT server uit in `.env`:
+```bash
+ENABLE_GATT_SERVER=0
+```
+
+### BLE scanning werkt niet
+**Symptoom:** Geen apparaten gevonden
+
+**Oplossingen:**
+- Check of Bluetooth aan staat: `sudo hciconfig hci0 up`
+- Check of ESP32 de juiste service UUID adverteert
+- Verhoog log level in `.env`: `LOG_LEVEL=DEBUG`
+- Check logs: `journalctl -u scoreboard -f`
+
+### Server start niet op Windows
+**Symptoom:** BLE errors op Windows
+
+**Oplossing:** Dit is normaal! BLE scanning werkt alleen op Linux. Voor development op Windows:
+```bash
+# In .env:
+ENABLE_TEST_ENDPOINTS=1
+```
+
+Dan kun je test apparaten toevoegen via: `POST http://localhost:8000/api/test/add`
 
 ## Beperkingen
 

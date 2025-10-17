@@ -45,12 +45,14 @@ PORT = int(os.getenv("PORT", "8000"))
 # Test endpoints (simulatie zonder echte BLE). Zet ENABLE_TEST_ENDPOINTS=1 om /api/test/* routes te activeren.
 ENABLE_TEST_ENDPOINTS = os.getenv("ENABLE_TEST_ENDPOINTS", "0") in ("1", "true", "True")
 
-# BLE advertising (Pi als peripheral) – experimenteel: Linux + BlueZ vereist.
-ENABLE_ADVERTISING = os.getenv("ENABLE_ADVERTISING", "0") in ("1", "true", "True")
-ADVERTISING_NAME = os.getenv("ADVERTISING_NAME", "scoreboard-PI")
+# BLE advertising (Pi als peripheral) – Linux + BlueZ vereist.
+# Standaard AAN zodat Pi als BLE server werkt waar ESP32's mee verbinden
+ENABLE_ADVERTISING = os.getenv("ENABLE_ADVERTISING", "1") in ("1", "true", "True")
+ADVERTISING_NAME = os.getenv("ADVERTISING_NAME", "S3-Scoreboard")
 
 # GATT server voor peripheral mode (vereist ENABLE_ADVERTISING=1 en pydbus)
-ENABLE_GATT_SERVER = os.getenv("ENABLE_GATT_SERVER", "0") in ("1", "true", "True")
+# Standaard AAN voor BLE server functionaliteit
+ENABLE_GATT_SERVER = os.getenv("ENABLE_GATT_SERVER", "1") in ("1", "true", "True")
 
 # Logging level
 LOG_LEVEL = os.getenv("LOG_LEVEL", "WARNING").upper()
